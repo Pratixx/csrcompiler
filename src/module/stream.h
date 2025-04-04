@@ -9,16 +9,23 @@ typedef enum {
 	TOKEN_TYPE_INVALID,
 	TOKEN_TYPE_EOF,
 	
-	TOKEN_TYPE_LITERAL,
-	TOKEN_TYPE_TYPE,
 	TOKEN_TYPE_IDENTIFIER,
 	
+	// Literal tokens
+	TOKEN_TYPE_LITERAL_CHAR,
+	TOKEN_TYPE_LITERAL_STR,
+	TOKEN_TYPE_LITERAL_INT,
+	TOKEN_TYPE_LITERAL_INT_HEX,
+	TOKEN_TYPE_LITERAL_FLOAT,
+	
 	// Punctuator tokens
+	TOKEN_TYPE_PT_AMPERSAND,
 	TOKEN_TYPE_PT_SEMICOLON,
 	TOKEN_TYPE_PT_COMMA,
 	TOKEN_TYPE_PT_PERIOD,
 	TOKEN_TYPE_PT_COLON,
 	TOKEN_TYPE_PT_ARROW,
+	TOKEN_TYPE_PT_QUESTION,
 	
 	TOKEN_TYPE_PT_OPEN_PAREN,
 	TOKEN_TYPE_PT_CLOSE_PAREN,
@@ -28,10 +35,6 @@ typedef enum {
 	
 	TOKEN_TYPE_PT_OPEN_BRACKET,
 	TOKEN_TYPE_PT_CLOSE_BRACKET,
-	
-	// Type tokens
-	TOKEN_TYPE_TYPE_PTR,
-	TOKEN_TYPE_TYPE_REF, // Might not use this
 	
 	// Operator tokens
 	TOKEN_TYPE_OP_ADD,
@@ -85,6 +88,24 @@ typedef enum {
 	TOKEN_TYPE_OP_ASSIGN_BIT_SHIFT_LEFT,
 	TOKEN_TYPE_OP_ASSIGN_BIT_SHIFT_RIGHT,
 	
+	// Type specifier tokens
+	TOKEN_TYPE_SP_PTR,
+	
+	TOKEN_TYPE_SP_VOID,
+	
+	TOKEN_TYPE_SP_LONG,
+	TOKEN_TYPE_SP_SHORT,
+	
+	TOKEN_TYPE_SP_SIGNED,
+	
+	// Type qualifier tokens
+	TOKEN_TYPE_QU_CONST,
+	TOKEN_TYPE_QU_RESTRICT,
+	TOKEN_TYPE_QU_VOLATILE,
+	TOKEN_TYPE_QU_ATOMIC,
+	TOKEN_TYPE_QU_STATIC,
+	TOKEN_TYPE_QU_THREAD_LOCAL,
+	
 	// Keyword tokens
 	TOKEN_TYPE_KW_RETURN,
 	
@@ -98,20 +119,16 @@ typedef enum {
 	
 	TOKEN_TYPE_KW_STATIC,
 	
-	TOKEN_TYPE_KW_INLINE,
-	
 	TOKEN_TYPE_KW_USING,
 	
 	TOKEN_TYPE_KW_IF,
 	TOKEN_TYPE_KW_ELSE,
+	TOKEN_TYPE_KW_SWITCH,
+	TOKEN_TYPE_KW_CASE,
 	
 	TOKEN_TYPE_KW_WHILE,
 	TOKEN_TYPE_KW_FOR,
 	TOKEN_TYPE_KW_CONTINUE,
-	
-	TOKEN_TYPE_KW_SWITCH,
-	TOKEN_TYPE_KW_CASE,
-	TOKEN_TYPE_KW_DEFAULT,
 	
 	TOKEN_TYPE_KW_BREAK,
 	TOKEN_TYPE_KW_JUMP,
@@ -130,13 +147,9 @@ typedef struct token {
 
 /*////////*/
 
-typedef enum {
-	STREAM_SUCCESS,
-	STREAM_ERROR_MEM_ALLOC,
-} stream_error;
-
 typedef struct {
 	code* pCode;
+	symbol_table* pSymbolTable;
 } stream_info;
 
 typedef struct {
@@ -150,5 +163,5 @@ typedef struct {
 
 void stream_print(stream* pStream);
 
-stream_error stream_create(stream* pStream, stream_info* pInfo);
+bool stream_create(stream* pStream, stream_info* pInfo);
 void stream_destroy(stream* pStream);

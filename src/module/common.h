@@ -1,5 +1,12 @@
 #pragma once
 
+/* NOTES
+// At the moment, compiler uses iterative checking, not hash table. Order keywords, operators, and the such
+// from longest to shortest if they share the same first character. For example, put ++ before +, and -- before -.
+// 
+// Also be sure to check punctuators before operators, as -> is a punctuator and - is an operator.
+*/ 
+
 // [ MACROS ] //
 
 #define MAX_VALUE_LEN 32
@@ -16,22 +23,10 @@
 #include "code.h"
 #include "symbol.h"
 #include "stream.h"
+#include "error.h"
 #include "ast.h"
 
 // [ DEFINING ] //
-
-typedef enum {
-	
-	// Syntactic errors
-	ERROR_SYNTACTIC_MISSING_OPERATOR,
-	ERROR_SYNTACTIC_HEADER_EXPORT,
-	
-	// Semantic errors
-	ERROR_SEMANTIC_TYPE_MISMATCH,
-	
-} error;
-
-/*////////*/
 
 struct token_table {
 	char* name;
@@ -55,23 +50,19 @@ static struct token_table token_kw_table[] = {
 	
 	{"static", TOKEN_TYPE_KW_STATIC},
 	
-	{"inline", TOKEN_TYPE_KW_INLINE},
-	
 	{"using", TOKEN_TYPE_KW_USING},
 	
-	{"if", TOKEN_TYPE_KW_IF},
+	{"if",   TOKEN_TYPE_KW_IF},
 	{"else", TOKEN_TYPE_KW_ELSE},
+	{"switch",  TOKEN_TYPE_KW_SWITCH},
+	{"case",    TOKEN_TYPE_KW_CASE},
 	
-	{"while", TOKEN_TYPE_KW_WHILE},
-	{"for", TOKEN_TYPE_KW_FOR},
+	{"while",    TOKEN_TYPE_KW_WHILE},
+	{"for",      TOKEN_TYPE_KW_FOR},
 	{"continue", TOKEN_TYPE_KW_CONTINUE},
 	
-	{"switch", TOKEN_TYPE_KW_SWITCH},
-	{"case", TOKEN_TYPE_KW_CASE},
-	{"default", TOKEN_TYPE_KW_DEFAULT},
-	
 	{"break", TOKEN_TYPE_KW_BREAK},
-	{"jump", TOKEN_TYPE_KW_JUMP},
+	{"jump",  TOKEN_TYPE_KW_JUMP},
 	
 	{"import", TOKEN_TYPE_KW_IMPORT},
 	{"export", TOKEN_TYPE_KW_EXPORT},
@@ -88,6 +79,9 @@ static struct token_table token_pt_table[] = {
 	
 	{";", TOKEN_TYPE_PT_SEMICOLON},
 	{":", TOKEN_TYPE_PT_COLON},
+	
+	{"*", TOKEN_TYPE_PT_AMPERSAND},
+	{"?", TOKEN_TYPE_PT_QUESTION},
 	
 	{"{", TOKEN_TYPE_PT_OPEN_BRACE},
 	{"}", TOKEN_TYPE_PT_CLOSE_BRACE},
@@ -109,11 +103,12 @@ static struct token_table token_pt_table[] = {
 // Token operator table
 static struct token_table token_op_table[] = {
 	
-	{"+", TOKEN_TYPE_OP_ADD},
-	{"-", TOKEN_TYPE_OP_SUB},
-	{"*", TOKEN_TYPE_OP_MUL},
-	{"/", TOKEN_TYPE_OP_DIV},
-	{"%", TOKEN_TYPE_OP_MOD},
+	{"&=",  TOKEN_TYPE_OP_ASSIGN_BIT_AND},
+	{"|=",  TOKEN_TYPE_OP_ASSIGN_BIT_OR},
+	{"^=",  TOKEN_TYPE_OP_ASSIGN_BIT_XOR},
+	{"~=",  TOKEN_TYPE_OP_ASSIGN_BIT_NOT},
+	{"<<=", TOKEN_TYPE_OP_ASSIGN_BIT_SHIFT_LEFT},
+	{">>=", TOKEN_TYPE_OP_ASSIGN_BIT_SHIFT_RIGHT},
 	
 	{"&",  TOKEN_TYPE_OP_BIT_AND},
 	{"|",  TOKEN_TYPE_OP_BIT_OR},
@@ -121,28 +116,6 @@ static struct token_table token_op_table[] = {
 	{"~",  TOKEN_TYPE_OP_BIT_NOT},
 	{"<<", TOKEN_TYPE_OP_BIT_SHIFT_LEFT},
 	{">>", TOKEN_TYPE_OP_BIT_SHIFT_RIGHT},
-	
-	{"=",  TOKEN_TYPE_OP_ASSIGN},
-	{"+=", TOKEN_TYPE_OP_ASSIGN_ADD},
-	{"-=", TOKEN_TYPE_OP_ASSIGN_SUB},
-	{"*=", TOKEN_TYPE_OP_ASSIGN_MUL},
-	{"/=", TOKEN_TYPE_OP_ASSIGN_DIV},
-	{"%=", TOKEN_TYPE_OP_ASSIGN_MOD},
-	
-	{"&",  TOKEN_TYPE_OP_ASSIGN_BIT_AND},
-	{"|",  TOKEN_TYPE_OP_ASSIGN_BIT_OR},
-	{"^",  TOKEN_TYPE_OP_ASSIGN_BIT_XOR},
-	{"~",  TOKEN_TYPE_OP_ASSIGN_BIT_NOT},
-	{"<<", TOKEN_TYPE_OP_ASSIGN_BIT_SHIFT_LEFT},
-	{">>", TOKEN_TYPE_OP_ASSIGN_BIT_SHIFT_RIGHT},
-	
-	{"++", TOKEN_TYPE_OP_INC},
-	{"--", TOKEN_TYPE_OP_DEC},
-	
-	{"?", TOKEN_TYPE_OP_TERNARY_IF},
-	{":", TOKEN_TYPE_OP_TERNARY_ELSE},
-	
-	{"*", TOKEN_TYPE_OP_DEREF},
 	
 	{"&&", TOKEN_TYPE_OP_CMP_AND},
 	{"||", TOKEN_TYPE_OP_CMP_OR},
@@ -153,7 +126,72 @@ static struct token_table token_op_table[] = {
 	{">=", TOKEN_TYPE_OP_CMP_GREATER_EQUAL},
 	{"!",  TOKEN_TYPE_OP_CMP_NOT},
 	
+	{"=",  TOKEN_TYPE_OP_ASSIGN},
+	{"+=", TOKEN_TYPE_OP_ASSIGN_ADD},
+	{"-=", TOKEN_TYPE_OP_ASSIGN_SUB},
+	{"*=", TOKEN_TYPE_OP_ASSIGN_MUL},
+	{"/=", TOKEN_TYPE_OP_ASSIGN_DIV},
+	{"%=", TOKEN_TYPE_OP_ASSIGN_MOD},
+	
+	{"++", TOKEN_TYPE_OP_INC},
+	{"--", TOKEN_TYPE_OP_DEC},
+	
+	{"+", TOKEN_TYPE_OP_ADD},
+	{"-", TOKEN_TYPE_OP_SUB},
+	{"*", TOKEN_TYPE_OP_MUL},
+	{"/", TOKEN_TYPE_OP_DIV},
+	{"%", TOKEN_TYPE_OP_MOD},
+	
 	{"", TOKEN_TYPE_UNDEFINED}
+	
+};
+
+// Token type specifier table
+static struct token_table token_sp_table[] = {
+	
+	{"*", TOKEN_TYPE_SP_PTR},
+	
+	{"void", TOKEN_TYPE_SP_VOID},
+	
+	{"long", TOKEN_TYPE_SP_LONG},
+	{"short", TOKEN_TYPE_SP_SHORT},
+	
+	{"signed", TOKEN_TYPE_SP_SIGNED},
+	
+	{"", TOKEN_TYPE_UNDEFINED}
+	
+};
+
+// Token type qualifier table
+static struct token_table token_qu_table[] = {
+	
+	{"const", TOKEN_TYPE_QU_CONST},
+	{"restrict", TOKEN_TYPE_QU_RESTRICT},
+	{"volatile", TOKEN_TYPE_QU_VOLATILE},
+	{"atomic", TOKEN_TYPE_QU_ATOMIC},
+	{"static", TOKEN_TYPE_QU_STATIC},
+	{"thread_local", TOKEN_TYPE_QU_THREAD_LOCAL},
+	
+	{"", TOKEN_TYPE_UNDEFINED}
+	
+};
+
+/*////////*/
+
+struct node_table {
+	token_type token;
+	node_type type;
+};
+
+static struct node_table node_math_table[] = {
+	
+	{TOKEN_TYPE_OP_ADD, NODE_TYPE_MATH_ADD},
+	{TOKEN_TYPE_OP_SUB, NODE_TYPE_MATH_SUB},
+	{TOKEN_TYPE_OP_MUL, NODE_TYPE_MATH_MUL},
+	{TOKEN_TYPE_OP_DIV, NODE_TYPE_MATH_DIV},
+	{TOKEN_TYPE_OP_MOD, NODE_TYPE_MATH_MOD},
+	
+	{TOKEN_TYPE_UNDEFINED, NODE_TYPE_UNDEFINED},
 	
 };
 

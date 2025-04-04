@@ -11,10 +11,10 @@
 
 // [ FUNCTIONS ] //
 
-symbol_table_error symbol_table_resize(symbol_table* pSymbolTable) {
+bool symbol_table_resize(symbol_table* pSymbolTable) {
 	
 	// If the buffer can hold more elements, just return
-	if (pSymbolTable->size < pSymbolTable->memSize) return SYMBOL_TABLE_SUCCESS;
+	if (pSymbolTable->size < pSymbolTable->memSize) return true;
 	
 	// If there is no buffer, allocate a new buffer
 	if (pSymbolTable->memSize == 0) {
@@ -25,19 +25,19 @@ symbol_table_error symbol_table_resize(symbol_table* pSymbolTable) {
 		
 		// Allocate a new buffer
 		symbol* newBuffer = calloc(pSymbolTable->memSize, sizeof(symbol));
-		if (!newBuffer) return SYMBOL_TABLE_ERROR_MEM_ALLOC;
+		if (!newBuffer) return false;
 		
 		// Assign the new buffer to the old one
 		pSymbolTable->buffer = newBuffer;
 		
 		// Return success
-		return STREAM_SUCCESS;
+		return true;
 		
 	}
 	
 	// Allocate a new buffer
 	symbol* newBuffer = calloc((pSymbolTable->memSize * 2), sizeof(symbol));
-	if (!newBuffer) return STREAM_ERROR_MEM_ALLOC;
+	if (!newBuffer) return false;
 	
 	// Copy the new memory in and free the old buffer
 	memcpy(newBuffer, pSymbolTable->buffer, (pSymbolTable->memSize * sizeof(symbol)));
@@ -48,13 +48,13 @@ symbol_table_error symbol_table_resize(symbol_table* pSymbolTable) {
 	pSymbolTable->buffer = newBuffer;
 	
 	// Return success
-	return SYMBOL_TABLE_SUCCESS;
+	return true;
 	
 }
 
 /*////////*/
 
-symbol* symbol_add(symbol_table* pSymbolTable, char* identifier, symbol_type type, uint16_t class) {
+symbol* symbol_add(symbol_table* pSymbolTable, char* identifier, symbol_type type, symbol_size size, uint16_t class) {
 	
 	// Resize if needed
 	symbol_table_resize(pSymbolTable);
@@ -62,7 +62,7 @@ symbol* symbol_add(symbol_table* pSymbolTable, char* identifier, symbol_type typ
 	// Add a new symbol to the buffer
 	strcpy(pSymbolTable->buffer[pSymbolTable->size].identifier, identifier);
 	pSymbolTable->buffer[pSymbolTable->size].type = type;
-	pSymbolTable->buffer[pSymbolTable->size].size = SYMBOL_SIZE_BITS_0;
+	pSymbolTable->buffer[pSymbolTable->size].size = size;
 	pSymbolTable->buffer[pSymbolTable->size].class = class;
 	(pSymbolTable->size)++;
 	
@@ -77,10 +77,23 @@ symbol* symbol_find(symbol_table* pSymbolTable, char* identifier, uint16_t class
 	for (size_t i = 0; i < pSymbolTable->size; i++) {
 		
 		// If the strings match, we found the identifier
-		if ((pSymbolTable->buffer[i].class == class) && (strcmp(pSymbolTable->buffer[i].identifier, identifier) == 0)) {
+		if (class == SYMBOL_CLASS_ALL) {
 			
-			// Return this pointer
-			return &pSymbolTable->buffer[i];
+			if (strcmp(pSymbolTable->buffer[i].identifier, identifier) == 0) {
+			
+				// Return this pointer
+				return &pSymbolTable->buffer[i];
+				
+			}
+			
+		} else {
+			
+			if ((pSymbolTable->buffer[i].class == class) && (strcmp(pSymbolTable->buffer[i].identifier, identifier) == 0)) {
+			
+				// Return this pointer
+				return &pSymbolTable->buffer[i];
+				
+			}
 			
 		}
 		
@@ -100,15 +113,14 @@ void symbol_table_print(symbol_table* pSymbolTable) {
 		
 		symbol* thisSymbol = &pSymbolTable->buffer[i];
 		
-		print_utf8("Symbol %s:\n", thisSymbol->identifier);
+		print_utf8("Symbol \"%s\":\n", thisSymbol->identifier);
 		print_utf8("Type: %s",
 			(thisSymbol->type == SYMBOL_TYPE_FUNCTION) ? "FUNCTION" :
 			(thisSymbol->type == SYMBOL_TYPE_VARIABLE) ? "VARIABLE" :
 			(thisSymbol->type == SYMBOL_TYPE_MODULE) ? "MODULE" :
 			(thisSymbol->type == SYMBOL_TYPE_HEADER) ? "MODULE" :
 			(thisSymbol->type == SYMBOL_TYPE_TYPE) ? "TYPE" :
-			(thisSymbol->type == SYMBOL_TYPE_TYPE_QUALIFIER) ? "TYPE_QUALIFIER" :
-			(thisSymbol->type == SYMBOL_TYPE_STORAGE_SPECIFIER) ? "STORAGE_SPECIFIER" :
+			(thisSymbol->type == SYMBOL_TYPE_LITERAL) ? "LITERAL" :
 			"UNKNOWN"
 		);
 		print_utf8("\n");
@@ -117,13 +129,13 @@ void symbol_table_print(symbol_table* pSymbolTable) {
 	
 }
 
-symbol_table_error symbol_table_create(symbol_table* pSymbolTable) {
+bool symbol_table_create(symbol_table* pSymbolTable) {
 	
 	// Allocate a buffer for the symbol table
-	if (symbol_table_resize(pSymbolTable) == SYMBOL_TABLE_ERROR_MEM_ALLOC) return SYMBOL_TABLE_ERROR_MEM_ALLOC;
+	if (!symbol_table_resize(pSymbolTable)) return false;
 	
 	// Return success
-	return SYMBOL_TABLE_SUCCESS;
+	return true;
 	
 }
 

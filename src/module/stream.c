@@ -11,10 +11,37 @@
 
 // [ FUNCTIONS ] //
 
-stream_error stream_resize(stream* pStream) { 
+int cststrncmp(const char *str1, const char *str2, size_t n) {
+    // Compare up to n characters
+    for (size_t i = 0; i < n; ++i) {
+        // If both strings are null-terminated, return 0
+        if (str1[i] == '\0' && str2[i] == '\0') {
+            return 0;
+        }
+        // If one string ends prematurely, return difference
+        if (str1[i] == '\0' || str2[i] == '\0') {
+            return (unsigned char)str1[i] - (unsigned char)str2[i];
+        }
+        // Compare characters at current index
+        if (str1[i] != str2[i]) {
+            return (unsigned char)str1[i] - (unsigned char)str2[i];
+        }
+    }
+    
+    // After n characters, check that both strings are null-terminated
+    if (str1[n] != '\0' || str2[n] != '\0') {
+        return (unsigned char)str1[n] - (unsigned char)str2[n];
+    }
+	
+    return 0;  // Strings are equal up to n characters and both end with null terminator
+}
+
+/*////////*/
+
+bool stream_resize(stream* pStream) { 
 	
 	// If the buffer can hold more elements, just return
-	if (pStream->size < pStream->memSize) return SYMBOL_TABLE_SUCCESS;
+	if (pStream->size < pStream->memSize) return true;
 	
 	// If there is no buffer, allocate a new buffer
 	if (pStream->memSize == 0) {
@@ -25,19 +52,19 @@ stream_error stream_resize(stream* pStream) {
 		
 		// Allocate a new buffer
 		token* newBuffer = calloc(pStream->memSize, sizeof(token));
-		if (!newBuffer) return STREAM_ERROR_MEM_ALLOC;
+		if (!newBuffer) return false;
 		
 		// Assign the new buffer to the old one
 		pStream->buffer = newBuffer;
 		
 		// Return success
-		return STREAM_SUCCESS;
+		return true;
 		
 	}
 	
 	// Allocate a new buffer
 	token* newBuffer = calloc((pStream->memSize * 2), sizeof(token));
-	if (!newBuffer) return STREAM_ERROR_MEM_ALLOC;
+	if (!newBuffer) return false;
 	
 	// Copy the new memory in and free the old buffer
 	memcpy(newBuffer, pStream->buffer, (pStream->memSize * sizeof(token)));
@@ -48,23 +75,19 @@ stream_error stream_resize(stream* pStream) {
 	pStream->buffer = newBuffer;
 	
 	// Return success
-	return STREAM_SUCCESS;
+	return true;
 	
 }
 
 /*////////*/
 
 token_type str_isKeyword(const char* str) {
-	
 	size_t index = 0;
-	
-	while (token_kw_table[index].type != TOKEN_TYPE_UNDEFINED) {
-		if (strncmp(str, token_kw_table[index].name, strlen(token_kw_table[index].name)) == 0) return token_kw_table[index].type;
+    while (token_kw_table[index].type != TOKEN_TYPE_UNDEFINED) {  
+		if (cststrncmp(str, token_kw_table[index].name, strlen(token_kw_table[index].name)) == 0) return token_kw_table[index].type;
 		index++;
-	}
-	
+    }  
 	return TOKEN_TYPE_UNDEFINED;
-	
 }
 
 token_type str_isLiteral(const char* str) {
@@ -72,44 +95,88 @@ token_type str_isLiteral(const char* str) {
 	if (str[0] == '\0') return TOKEN_TYPE_EOF;
 	
 	// Number literals
-	if (isdigit(str[0])) {
+	if (isdigit(str[0]) || ((str[0] == '.') && isdigit(str[1]))) {
+		bool dot_seen = false;
 		while (*str != '\0') {
-			if (isdigit(*str)) str++;
-			else return TOKEN_TYPE_INVALID;
+			if (isdigit(*str)) {
+				str++;
+			} else if ((*str == '.') && (!dot_seen)) {
+				dot_seen = true;
+				str++;
+			} else {
+				return TOKEN_TYPE_INVALID;
+			}
 		}
-		return TOKEN_TYPE_LITERAL;
+		
+		return dot_seen ? TOKEN_TYPE_LITERAL_FLOAT : TOKEN_TYPE_LITERAL_INT;
+		
 	}
+	
+	// String literal
+	if (str[0] == '"') {
+		str++;
+		while (*str != '\0' && *str != '"') {
+			str++;
+		}
+		if (*str == '"') {
+			return TOKEN_TYPE_LITERAL_STR;
+		}
+		return TOKEN_TYPE_INVALID;
+	}
+	
+    // Character literal
+    if (str[0] == '\'' && str[1] != '\0') {
+        if (str[2] == '\'') {
+            return TOKEN_TYPE_LITERAL_CHAR;
+        } else if (str[1] == '\\' && str[2] != '\0' && str[3] == '\'') {
+            return TOKEN_TYPE_LITERAL_CHAR;
+        }
+    }
 	
 	return TOKEN_TYPE_UNDEFINED;
 	
 }
 
 token_type str_isOperator(const char* str) {
-	
 	size_t index = 0;
-	
 	while (token_op_table[index].type != TOKEN_TYPE_UNDEFINED) {
 		if (strncmp(str, token_op_table[index].name, strlen(token_op_table[index].name)) == 0) return token_op_table[index].type;
 		index++;
 	}
-	
 	return TOKEN_TYPE_UNDEFINED;
-	
 }
 
 token_type str_isPunctuator(const char* str) {
-	
 	size_t index = 0;
-	
 	while (token_pt_table[index].type != TOKEN_TYPE_UNDEFINED) {
 		
 		if (strncmp(str, token_pt_table[index].name, strlen(token_pt_table[index].name)) == 0) return token_pt_table[index].type;
 		index++;
 		
 	}
-	
 	return TOKEN_TYPE_UNDEFINED;
-	
+}
+
+token_type str_isTypeSpecifier(const char* str) {
+	size_t index = 0;
+	while (token_sp_table[index].type != TOKEN_TYPE_UNDEFINED) {
+		
+		if (cststrncmp(str, token_sp_table[index].name, strlen(token_sp_table[index].name)) == 0) return token_sp_table[index].type;
+		index++;
+		
+	}
+	return TOKEN_TYPE_UNDEFINED;
+}
+
+token_type str_isTypeQualifier(const char* str) {
+	size_t index = 0;
+	while (token_qu_table[index].type != TOKEN_TYPE_UNDEFINED) {
+		
+		if (cststrncmp(str, token_qu_table[index].name, strlen(token_qu_table[index].name)) == 0) return token_qu_table[index].type;
+		index++;
+		
+	}
+	return TOKEN_TYPE_UNDEFINED;
 }
 
 /*////////*/
@@ -152,20 +219,20 @@ token token_parse(code* pCode) {
 			thisToken.value[tokenValueIndex + 1] = '\0';
 		}
 		
-		// Only check for an operator if the value is less than the maximum operator length
-		if (tokenValueIndex < MAX_OPERATOR_LEN) {
-			thisToken.type = str_isOperator(thisToken.value);
-			if (thisToken.type != TOKEN_TYPE_UNDEFINED) break;
-		}
-		
 		// Only check for an punctuator if the value is less than the maximum punctuator length
 		if (tokenValueIndex < MAX_PUNCTUATOR_LEN) {
 			thisToken.type = str_isPunctuator(thisToken.value);
 			if (thisToken.type != TOKEN_TYPE_UNDEFINED) break;
 		}
 		
+		// Only check for an operator if the value is less than the maximum operator length
+		if (tokenValueIndex < MAX_OPERATOR_LEN) {
+			thisToken.type = str_isOperator(thisToken.value);
+			if (thisToken.type != TOKEN_TYPE_UNDEFINED) break;
+		}
+		
 		// If this character is whitespace, an operator, or a punctuator, we should check if this is a literal or keyword
-		if (char_isWhitespace(thisStr[1]) || str_isOperator(&thisStr[1]) || str_isPunctuator(&thisStr[1])) {
+		if (char_isWhitespace(thisStr[1]) || str_isPunctuator(&thisStr[1]) || str_isOperator(&thisStr[1])) {
 			
 			// Check if this token is a literal
 			thisToken.type = str_isLiteral(thisToken.value);
@@ -175,10 +242,18 @@ token token_parse(code* pCode) {
 			thisToken.type = str_isKeyword(thisToken.value);
 			if (thisToken.type != TOKEN_TYPE_UNDEFINED) break;
 			
-			// If it's neither, it's probably invalid
+			// Check if this token is a type specifier
+			thisToken.type = str_isTypeSpecifier(thisToken.value);
+			if (thisToken.type != TOKEN_TYPE_UNDEFINED) break;
+			
+			// Check if this token is a type qualifier
+			thisToken.type = str_isTypeQualifier(thisToken.value);
+			if (thisToken.type != TOKEN_TYPE_UNDEFINED) break;
+			
+			// If it's none of them, it's probably invalid
 			thisToken.type = TOKEN_TYPE_INVALID;
 			break;
-				
+			
 		}
 		
 		// If the current character is whitespace, then this token is invalid
@@ -222,74 +297,67 @@ void stream_print(stream* pStream) {
 			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_KW_EXPORT) ? "KW_EXPORT" :
 			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_KW_MODULE) ? "KW_MODULE" :
 			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_KW_HEADER) ? "KW_HEADER" :
-			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_LITERAL) ? strcat(strcat(strcpy(value, "LITERAL ["), pStream->buffer[tokenSetIndex].value), "]") :
-			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_TYPE) ? strcat(strcat(strcpy(value, "TYPE ["), pStream->buffer[tokenSetIndex].value), "]") :
+			
+			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_LITERAL_CHAR) ? strcat(strcat(strcpy(value, "LITERAL_CHAR ["), pStream->buffer[tokenSetIndex].value), "]") :
+			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_LITERAL_STR) ? strcat(strcat(strcpy(value, "LITERAL_STR ["), pStream->buffer[tokenSetIndex].value), "]") :
+			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_LITERAL_INT) ? strcat(strcat(strcpy(value, "LITERAL_INT ["), pStream->buffer[tokenSetIndex].value), "]") :
+			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_LITERAL_INT_HEX) ? strcat(strcat(strcpy(value, "LITERAL_INT_HEX ["), pStream->buffer[tokenSetIndex].value), "]") :
+			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_LITERAL_FLOAT) ? strcat(strcat(strcpy(value, "LITERAL_FLOAT ["), pStream->buffer[tokenSetIndex].value), "]") :
+			
 			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_IDENTIFIER) ? strcat(strcat(strcpy(value, "IDENTIFIER ["), pStream->buffer[tokenSetIndex].value), "]") :
-			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_PT_SEMICOLON) ? "PN_SEMICOLON" :
 			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_INVALID)   ? strcat(strcat(strcpy(value, "INVALID ["), pStream->buffer[tokenSetIndex].value), "]")   :
+			
 			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_UNDEFINED) ? "UNDEFINED" :
+			
 			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_OP_ASSIGN) ? "OP_ASSIGN" :
 			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_OP_ADD) ? "OP_ADD" :
 			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_OP_SUB) ? "OP_SUB" :
 			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_OP_MUL) ? "OP_MUL" :
 			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_OP_DIV) ? "OP_DIV" :
-			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_PT_OPEN_PAREN)  ? "PN_OPEN_PAREN"  :
-			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_PT_CLOSE_PAREN) ? "PN_CLOSE_PAREN" :
-			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_PT_OPEN_BRACE)  ? "PN_OPEN_BRACE"  :
-			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_PT_CLOSE_BRACE) ? "PN_CLOSE_BRACE" :
+			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_OP_MOD) ? "OP_MOD" :
+			
+			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_PT_SEMICOLON) ? "PN_SEMICOLON" :
+			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_PT_COMMA) ? "PN_COMMA" :
+			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_PT_AMPERSAND) ? "PT_AMPERSAND" :
+			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_PT_OPEN_PAREN)  ? "PT_OPEN_PAREN"  :
+			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_PT_CLOSE_PAREN) ? "PT_CLOSE_PAREN" :
+			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_PT_OPEN_BRACE)  ? "PT_OPEN_BRACE"  :
+			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_PT_CLOSE_BRACE) ? "PT_CLOSE_BRACE" :
+			
+			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_SP_PTR) ? "SP_PTR" :
+			
+			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_QU_CONST) ? "QU_CONST" :
+			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_QU_RESTRICT) ? "QU_RESTRICT" :
+			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_QU_VOLATILE) ? "QU_VOLATILE" :
+			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_QU_ATOMIC) ? "QU_ATOMIC" :
+			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_QU_STATIC) ? "QU_STATIC" :
+			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_QU_THREAD_LOCAL) ? "QU_THREAD_LOCAL" :
+			
 			"EOF"
+			
 		);
 		tokenSetIndex++;
-		
 	}
 	
 	print_utf8("\n");
 	
 }
 
-stream_error stream_create(stream* pStream, stream_info* pInfo) {
+bool stream_create(stream* pStream, stream_info* pInfo) {
 	
 	// Allocate a buffer for the stream
-	if (stream_resize(pStream) == STREAM_ERROR_MEM_ALLOC) return STREAM_ERROR_MEM_ALLOC;
+	if (stream_resize(pStream) == false) return false;
 	
 	// Add new tokens until we reach EOF
 	while (1) {
-		if ((pStream->size) == pStream->memSize)  if (stream_resize(pStream) == STREAM_ERROR_MEM_ALLOC) return STREAM_ERROR_MEM_ALLOC;
+		if ((pStream->size) == pStream->memSize)  if (!stream_resize(pStream)) return false;
 		pStream->buffer[pStream->size] = token_parse(pInfo->pCode);
 		if (pStream->buffer[pStream->size].type == TOKEN_TYPE_EOF) break;
 		(pStream->size)++;
 	}
 	
-	// Perform resolving and syntactic analysis
-	for (pStream->index = 0; pStream->index < pStream->size; (pStream->index)++) {
-		
-		// Get the current stream
-		token* thisStream = &pStream->buffer[pStream->index];
-		
-		// Check if this is a token that needs resolving
-		if ((thisStream[0].type == TOKEN_TYPE_INVALID) && (pStream->index >= 1)) {
-			
-			if (thisStream[-1].type == TOKEN_TYPE_IDENTIFIER) {
-				
-				
-				
-				// Continue to the next token
-				continue;
-				
-			}
-			
-			if (thisStream[-1].type == TOKEN_TYPE_KW_HEADER) {
-				
-				
-				
-			}
-			
-		}
-		
-	}
-	
 	// Return success
-	return STREAM_SUCCESS;
+	return true;
 	
 }
 

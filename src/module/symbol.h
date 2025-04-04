@@ -12,8 +12,7 @@ typedef enum {
 	SYMBOL_TYPE_MODULE,
 	SYMBOL_TYPE_HEADER,
 	SYMBOL_TYPE_TYPE,
-	SYMBOL_TYPE_STORAGE_SPECIFIER,
-	SYMBOL_TYPE_TYPE_QUALIFIER,
+	SYMBOL_TYPE_LITERAL,
 } symbol_type;
 
 typedef enum {
@@ -28,19 +27,29 @@ typedef enum {
 } symbol_location;
 
 typedef enum {
-	SYMBOL_SIZE_BITS_0,
-	SYMBOL_SIZE_BITS_8,
-	SYMBOL_SIZE_BITS_16,
-	SYMBOL_SIZE_BITS_32,
-	SYMBOL_SIZE_BITS_64,
-	SYMBOL_SIZE_BITS_128,
+	SYMBOL_SIZE_BITS_0 = 0,
+	SYMBOL_SIZE_BITS_8 = 8,
+	SYMBOL_SIZE_BITS_16 = 16,
+	SYMBOL_SIZE_BITS_32 = 32,
+	SYMBOL_SIZE_BITS_64 = 64,
+	SYMBOL_SIZE_BITS_128 = 128,
 } symbol_size;
+
+typedef enum {
+	SYMBOL_CLASS_ALL,
+	SYMBOL_CLASS_TYPE,
+	SYMBOL_CLASS_VARIABLE,
+	SYMBOL_CLASS_FUNCTION,
+	SYMBOL_CLASS_MODULE,
+	SYMBOL_CLASS_HEADER,
+	SYMBOL_CLASS_LITERAL,
+} symbol_class;
 
 typedef struct {
 	
 	char identifier[MAX_VALUE_LEN];
 	
-	uint16_t class;
+	uint8_t class;
 	
 	symbol_size size;
 	symbol_type type;
@@ -54,11 +63,6 @@ typedef struct {
 
 /*////////*/
 
-typedef enum {
-	SYMBOL_TABLE_SUCCESS,
-	SYMBOL_TABLE_ERROR_MEM_ALLOC,
-} symbol_table_error;
-
 typedef struct {
 	size_t memSize;
 	size_t size;
@@ -67,12 +71,12 @@ typedef struct {
 
 // [ FUNCTIONS ] //
 
-symbol* symbol_add(symbol_table* pSymbolTable, char* identifier, symbol_type type, uint16_t class);
+symbol* symbol_add(symbol_table* pSymbolTable, char* identifier, symbol_type type, symbol_size size, uint16_t class);
 symbol* symbol_find(symbol_table* pSymbolTable, char* identifier, uint16_t class);
 
 /*////////*/
 
 void symbol_table_print(symbol_table* pSymbolTable);
 
-symbol_table_error symbol_table_create(symbol_table* pSymbolTable);
+bool symbol_table_create(symbol_table* pSymbolTable);
 void symbol_table_destroy(symbol_table* pSymbolTable);
