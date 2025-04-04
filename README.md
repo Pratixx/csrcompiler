@@ -10,7 +10,7 @@ The C* compiler is a C-like language which attempts to modernize the C language 
   - [X] Literals
   - [X] Keywords
   - [X] Punctuators
-  - [ ] Operators
+  - [X] Operators
 - [ ] Parser
     - [X] Function and variable recognition
     - [ ] Loops
