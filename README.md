@@ -2,6 +2,25 @@
 
 The C* compiler is a C-like language which attempts to modernize the C language by improving upon the preprocessor, removing legacy features, and sprinkling in a few concepts from C++. C*'s biggest features are its new preprocessor and the inclusion of a module (and header) system.
 
+![Top language badge](https://img.shields.io/github/languages/top/Pratixx/csrcompiler?style=plastic&label=C)
+![Lines of code badge](https://tokei.rs/b1/github/Pratixx/csrcompiler)
+
+## Roadmap
+- [X] Lexer
+  - [X] Literals
+  - [X] Keywords
+  - [X] Punctuators
+  - [ ] Operators
+- [ ] Parser
+    - [X] Function and variable recognition
+    - [ ] Loops
+    - [ ] Conditionals
+    - [ ] Expressions
+    - [ ] Statements
+- [ ] IR generation
+- [ ] Obj generation
+
+# Features
 ## New Preprocessor
 
 The C preprocessor is by no means pretty and can be rather restrictive in certain scenarios. It has been given more flexibility, so much to the point it could be considered too powerful. It's up to the programmer to use it properly.
