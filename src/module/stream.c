@@ -189,14 +189,13 @@ token token_parse(code* pCode) {
 	
 	thisToken.type = TOKEN_TYPE_UNDEFINED;
 	
-	// Skip whitespace and comments before appending
-	code_skipWhitespace(pCode);
-	
 	// Append characters and check if they are a valid keyword
 	while (1) {
 		
-		// Skip any comments
+		// Skip whitespace and comments before appending
+		code_skipWhitespace(pCode);
 		code_skipComments(pCode);
+		code_skipWhitespace(pCode);
 		
 		// If our code index is at the end of the file, return EOF immediately
 		if (pCode->index >= pCode->size) {

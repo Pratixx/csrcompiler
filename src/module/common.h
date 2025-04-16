@@ -46,10 +46,6 @@ static struct token_table token_kw_table[] = {
 	
 	{"namespace", TOKEN_TYPE_KW_NAMESPACE},
 	
-	{"auto", TOKEN_TYPE_KW_AUTO},
-	
-	{"static", TOKEN_TYPE_KW_STATIC},
-	
 	{"using", TOKEN_TYPE_KW_USING},
 	
 	{"if",   TOKEN_TYPE_KW_IF},
@@ -169,8 +165,10 @@ static struct token_table token_qu_table[] = {
 	{"restrict", TOKEN_TYPE_QU_RESTRICT},
 	{"volatile", TOKEN_TYPE_QU_VOLATILE},
 	{"atomic", TOKEN_TYPE_QU_ATOMIC},
+	{"auto", TOKEN_TYPE_QU_AUTO},
 	{"static", TOKEN_TYPE_QU_STATIC},
 	{"thread_local", TOKEN_TYPE_QU_THREAD_LOCAL},
+	{"static", TOKEN_TYPE_QU_STATIC},
 	
 	{"", TOKEN_TYPE_UNDEFINED}
 	

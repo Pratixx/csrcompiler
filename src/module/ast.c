@@ -9,6 +9,32 @@
 #include <stdbool.h>
 #include <string.h>
 
+// [ MACROS ] //
+
+#define advance(x) ((pStream->index) += (x))
+
+#define peek(x) (((pStream->index + (x)) >= pStream->size) ? (token){TOKEN_TYPE_EOF, ""} : (pStream->buffer[pStream->index + (x)]))
+#define upeek(x) (pStream->buffer[pStream->index + (x)])
+#define ppeek(x) ((pStream->index >= pStream->size + (x)) ? (token[]){(token){TOKEN_TYPE_EOF, ""}} : &(pStream->buffer[pStream->index + (x)]))
+
+// #define panic(x) for (; (pStream->index < pStream->size) && (pStream->buffer[pStream->index].type != x); (pStream->index)++)
+
+#define panic(...) \
+	do { \
+		int _found = 0; \
+		while (pStream->index < pStream->size) { \
+			int i; \
+			for (i = 0; i < sizeof((int[]){__VA_ARGS__}) / sizeof(int); i++) { \
+				if (pStream->buffer[pStream->index].type == ((int[]){__VA_ARGS__})[i]) { \
+					_found = 1; \
+					break; \
+				} \
+			} \
+			if (_found) break; \
+			(pStream->index)++; \
+		} \
+	} while (0)
+
 // [ FUNCTIONS ] //
 
 node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, error_table* pErrorTable);
@@ -92,7 +118,7 @@ bool node_isMath(node_type nodeType) {
 
 /*////////*/
 
-void token_resolve(token* pToken, symbol_table* pSymbolTable) {
+void token_resolve(token* pToken, node* pParent, symbol_table* pSymbolTable) {
 	
 	if (pToken->type == TOKEN_TYPE_INVALID) {
 		
@@ -101,6 +127,24 @@ void token_resolve(token* pToken, symbol_table* pSymbolTable) {
 		
 		// If this follows a type specifier or a type qualifier, it is most likely a type
 		if (token_isTypeSpecifier(pToken[-1].type) || token_isTypeQualifier(pToken[-1].type)) return;
+		
+		if (pParent->type == NODE_TYPE_CONDITION) return;
+		
+		if (pParent->type == NODE_TYPE_STATEMENT) {
+			
+			switch (pParent->tokenList[0].type) {
+				
+				// Intentional fallthrough
+				case (TOKEN_TYPE_KW_IF)
+				case (TOKEN_TYPE_KW_WHILE)
+				
+				return;
+				
+				default: break;
+				
+			}
+			
+		}
 		
 		// Check the symbol table to see if it's an identifier
 		symbol* foundSymbol = symbol_find(pSymbolTable, pToken->value, SYMBOL_CLASS_ALL);
@@ -214,6 +258,9 @@ void node_print(node* pNode, unsigned int depth) {
 		(pNode->type == NODE_TYPE_DECL_PARAMETER) ? "DECL_PARAM" :
 		(pNode->type == NODE_TYPE_MATH_ADD) ? "MATH_ADD" :
 		(pNode->type == NODE_TYPE_SCOPE) ? "SCOPE" :
+		(pNode->type == NODE_TYPE_CONDITION) ? "CONDITION" :
+		(pNode->type == NODE_TYPE_CONDITION_ELSE) ? "CONDITION_ELSE" :
+		(pNode->type == NODE_TYPE_ASSIGN) ? "ASSIGN" :
 		(pNode->type == NODE_TYPE_STATEMENT) ? "STATEMENT" :
 		"EOF"
 	);
@@ -242,42 +289,25 @@ void node_print(node* pNode, unsigned int depth) {
 // There are two principles this function should follow: it starts on the
 // token it will read, and it will end on the token afterwards in preparation
 // for the next node to be made. For example, "int var = 5;" should start on
-// "int" and end on ";", always.
+// "int" and end on the token after ";", always.
 
 node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, error_table* pErrorTable) {
-	
-	// Static variables to hold error codes
-	static error currentError = ERROR_NONE;
 	
 	// This current node
 	node* currentNode = node_new(NODE_TYPE_UNDEFINED, pParent);
 	if (!currentNode) return NULL;
 	
 	// Define the current token
-	token* startToken = &pStream->buffer[pStream->index];
+	token* startToken = ppeek(0);
 	
 	// Immediately attempt to resolve the token in case it is unresolved
-	token_resolve(startToken, pSymbolTable);
+	token_resolve(startToken, pParent, pSymbolTable);
 	
 	// Assign the token to the node
 	currentNode->tokenCount = 1;
 	currentNode->tokenList = startToken;
 	
-	// Define a token index
-	size_t tokenIndex = 0;
-	
-	// Handle parental checks
-	if ((pParent->type == NODE_TYPE_STATEMENT) && (pParent->tokenList[0].type == TOKEN_TYPE_KW_MODULE)) {
-		
-		currentNode->type = NODE_TYPE_IDENTIFIER;
-		
-		(pStream->index)++;
-		
-		return currentNode;
-		
-	}
-	
-	// Handle literals
+	// Resolve literals
 	if (token_isLiteral(startToken->type)) {
 		
 		// Get the length of the first token's value
@@ -300,134 +330,188 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 			currentNode->type = NODE_TYPE_INVALID;
 		}
 		
+		advance(1);
+		
+		return currentNode;
+		
 	}
 	
 	// Handle identifiers
-	if (token_isIdentifier(startToken->type)) {
+	if (token_isTypeQualifier(startToken->type) || token_isTypeSpecifier(startToken->type) || token_isIdentifier(startToken->type)) {
 		
-		currentNode->type = NODE_TYPE_IDENTIFIER;
-		
-		if ((pParent) && (pParent->type == NODE_TYPE_STATEMENT) && (pParent->tokenList[0].type == TOKEN_TYPE_KW_MODULE)) {
+		// Check if this is just a regular identifier attached to something else, or if it is really a function or variable
+		if (pParent->type == NODE_TYPE_STATEMENT) {
 			
-			(pStream->index) += 2;
+			switch (pParent->tokenList[0].type) {
+				
+				// Case fallthrough
+				case (TOKEN_TYPE_KW_MODULE)
+				case (TOKEN_TYPE_KW_HEADER)
+				case (TOKEN_TYPE_KW_RETURN)
+				
+				{
+					
+					currentNode->type = NODE_TYPE_IDENTIFIER;
+					
+					advance(1);
+					
+					return currentNode;
+					
+				};
+				
+				// In the case this does not meet the above
+				default: break;
+				
+			}
+			
+		}
+		
+		// Check if this is under a condition
+		if (pParent->type == NODE_TYPE_CONDITION) {
+			
+			currentNode->type = NODE_TYPE_IDENTIFIER;
+			
+			advance(1);
 			
 			return currentNode;
 			
-		};
+		}
 		
-	}
-	
-	// Handle variables and functions
-	if (token_isTypeQualifier(startToken->type) || token_isTypeSpecifier(startToken->type) || token_isIdentifier(startToken->type)) {
+		// Linkage and location for this symbol
+		symbol_linkage linkage = SYMBOL_LINKAGE_LOCAL;
+		symbol_location location = SYMBOL_LOCATION_INTERNAL;
+		
+		// Check if this follows the "export" keyword
+		if (peek(-1).type == TOKEN_TYPE_KW_EXPORT) linkage = SYMBOL_LINKAGE_GLOBAL;
+		
+		// Check if this follows the "import" keyword
+		if (peek(-1).type == TOKEN_TYPE_KW_IMPORT) location = SYMBOL_LOCATION_EXTERNAL;
+		
+		// Skip all of this if this is an automatic variable
+		if (peek(0).type == TOKEN_TYPE_QU_AUTO) goto auto_skip;
 		
 		// Resolve the remaining qualifiers and specifiers if this isn't an identifier
-		while (token_isTypeQualifier(pStream->buffer[pStream->index].type) || token_isTypeSpecifier(pStream->buffer[pStream->index].type)) {
+		while (token_isTypeQualifier(peek(0).type) || token_isTypeSpecifier(peek(0).type)) {
 			(currentNode->tokenCount)++;
-			(pStream->index)++;
+			advance(1);
 		}
 		
 		// Resolve the type of the declaration
-		token_resolve(&pStream->buffer[pStream->index], pSymbolTable);
+		token_resolve(ppeek(0), pParent, pSymbolTable);
 		
 		// Confirm that this was actually resolved into an identifier
-		if (!token_isIdentifier(pStream->buffer[pStream->index].type)) {
+		if (token_isIdentifier(peek(0).type)) {
+			advance(1);
+			(currentNode->tokenCount)++;
+		} else {
+			
+			error_table_push(pErrorTable, ERROR_SYNTACTIC_EXPECTED_TYPE, currentNode);
 			
 			currentNode->type = NODE_TYPE_INVALID;
 			
-			(currentNode->tokenCount)++;
+			// Panic relevant to this being a function or variable, and if it is a function, check if it is a declaration or definition
+			if (peek(0).type == TOKEN_TYPE_PT_OPEN_PAREN)
+				if (location == SYMBOL_LOCATION_EXTERNAL)
+					panic(TOKEN_TYPE_PT_SEMICOLON);
+				else
+					panic(TOKEN_TYPE_PT_CLOSE_BRACE);
+			else
+				panic(TOKEN_TYPE_PT_SEMICOLON);
+			
+			advance(1);
 			
 			return currentNode;
 			
 		}
 		
-		(pStream->index)++;
-		(currentNode->tokenCount)++;
+		// Auto skip point
+		auto_skip:
+		if (peek(0).type == TOKEN_TYPE_QU_AUTO) {
+			advance(1);
+			(currentNode->tokenCount)++;
+		}
 		
 		// Resolve the name of the definition
-		token_resolve(&pStream->buffer[pStream->index], pSymbolTable);
-			
+		token_resolve(ppeek(0), pParent, pSymbolTable);
+		
 		// Check for specifiers like pointers and skip them
-		while (pStream->buffer[pStream->index].type == TOKEN_TYPE_SP_PTR) {
+		while (peek(0).type == TOKEN_TYPE_SP_PTR) {
 			
 			(currentNode->tokenCount)++;
-			(pStream->index)++;
+			advance(1);
 			
-			token_resolve(&pStream->buffer[pStream->index], pSymbolTable);
+			token_resolve(ppeek(0), pParent, pSymbolTable);
 			
 		}
 		
 		// Confirm that this was actually resolved into an identifier
-		if (token_isIdentifier(pStream->buffer[pStream->index].type)) {
+		if (token_isIdentifier(peek(0).type)) {
 			
-			bool isparam = false;
-			
-			(pStream->index)++;
+			advance(1);
 			
 			// Check for a function
-			if (pStream->buffer[pStream->index].type == TOKEN_TYPE_PT_OPEN_PAREN) {
+			if (peek(0).type == TOKEN_TYPE_PT_OPEN_PAREN) {
 				
 				currentNode->type = NODE_TYPE_DECL_FUNCTION;
 				
 				node* thisNode = NULL;
 				
-				(pStream->index)++;
+				advance(1);
 				
 				// Get the function parameters
-				if (pStream->buffer[pStream->index].type != TOKEN_TYPE_PT_CLOSE_PAREN) {
+				if (peek(0).type != TOKEN_TYPE_PT_CLOSE_PAREN) {
 					
 					currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
 					thisNode = currentNode->firstChild;
 					
-					while (pStream->buffer[pStream->index].type != TOKEN_TYPE_PT_CLOSE_PAREN) {
+					while (peek(0).type != TOKEN_TYPE_PT_CLOSE_PAREN) {
 						
-						printf("%s, %d\n", pStream->buffer[pStream->index].value, pStream->buffer[pStream->index].type);
-						
-						if (pStream->buffer[pStream->index].type != TOKEN_TYPE_PT_COMMA)
+						if (peek(0).type != TOKEN_TYPE_PT_COMMA)
 							error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_COMMA, currentNode);
 						else
-							(pStream->index)++;
+							advance(1);
 						
 						thisNode->nextSibling = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
 						thisNode = thisNode->nextSibling;
 						
 					}
 					
-					(pStream->index)++;
+					advance(1);
 					
-				} else {
-					
-					(pStream->index)+= 2;
-					
-				}
+				} else
+					advance(2);
 				
 				// Get the function body
-				if (pStream->buffer[pStream->index].type == TOKEN_TYPE_PT_OPEN_BRACE) {
+				if (peek(0).type == TOKEN_TYPE_PT_OPEN_BRACE) {
 					
 					// Create a new scope node
 					node* scopeNode = node_new(NODE_TYPE_SCOPE, currentNode);
-					thisNode->nextSibling = scopeNode;
 					
-					(pStream->index)++;
+					if (thisNode)
+						thisNode->nextSibling = scopeNode;
+					else
+						currentNode->firstChild = scopeNode;
 					
 					// Get the first child
+					advance(1);
+					
 					scopeNode->firstChild = node_parse(pStream, thisNode, pSymbolTable, pErrorTable);
 					thisNode = scopeNode->firstChild;
 					
-					(pStream->index)++;
-					
-					while (pStream->buffer[pStream->index].type != TOKEN_TYPE_PT_CLOSE_BRACE) {
+					while (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
 						
 						thisNode->nextSibling = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
 						thisNode = thisNode->nextSibling;
 						
-						(pStream->index)++;
-						
 					}
 					
-				} else if ((pStream->buffer[pStream->index].type == TOKEN_TYPE_PT_SEMICOLON) && (pParent->type == NODE_TYPE_STATEMENT) && (pParent->tokenList[0].type == TOKEN_TYPE_KW_IMPORT)) {
+					advance(1);
 					
-					// Simply return here
-					return currentNode;
+				} else if ((peek(0).type == TOKEN_TYPE_PT_SEMICOLON) && (pParent->type == NODE_TYPE_STATEMENT) && (pParent->tokenList[0].type == TOKEN_TYPE_KW_IMPORT)) {
+					
+					advance(1);
+					
+					// Proceed to symbol resolution
 					
 				} else {
 					
@@ -435,20 +519,46 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 					
 				}
 				
-			} else if (pStream->buffer[pStream->index].type == TOKEN_TYPE_PT_SEMICOLON) {
+			} else if (peek(0).type == TOKEN_TYPE_PT_SEMICOLON) {
 				currentNode->type = NODE_TYPE_DECL_VARIABLE;
-				(pStream->index)++;
-			} else if (pStream->buffer[pStream->index].type == TOKEN_TYPE_OP_ASSIGN) {
-				// NOTE: Handle assignment
+				advance(1);
+			} else if (peek(0).type == TOKEN_TYPE_OP_ASSIGN) {
+				
 				currentNode->type = NODE_TYPE_DECL_VARIABLE;
-			} else if ((pStream->buffer[pStream->index].type == TOKEN_TYPE_PT_COMMA) || (pStream->buffer[pStream->index].type == TOKEN_TYPE_PT_CLOSE_PAREN)) {
+				
+				// Make an assignnment node
+				node* thisNode = node_new(NODE_TYPE_ASSIGN, currentNode);
+				thisNode->tokenCount = 1;
+				thisNode->tokenList = ppeek(0);
+				currentNode->firstChild = thisNode;
+				
+				// Assign the expression to this variable
+				advance(1);
+				
+				thisNode->firstChild = node_parse(pStream, thisNode, pSymbolTable, pErrorTable);
+				
+				if (peek(0).type != TOKEN_TYPE_PT_SEMICOLON)
+					error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_SEMICOLON, currentNode);
+				else
+					advance(1);
+				
+			} else if ((peek(0).type == TOKEN_TYPE_PT_COMMA) || (peek(0).type == TOKEN_TYPE_PT_CLOSE_PAREN)) {
 				if (pParent->type == NODE_TYPE_DECL_FUNCTION) {
+					
 					currentNode->type = NODE_TYPE_DECL_PARAMETER;
+					
 				} else {
+					
 					currentNode->type = NODE_TYPE_INVALID;
+					
+					return currentNode;
+					
 				}
 			} else {
+				
 				currentNode->type = NODE_TYPE_INVALID;
+				
+				return currentNode;
 			}
 			
 			// Add this symbol to the symbol table
@@ -482,17 +592,38 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 					}
 				}
 				
+				symbol* currentSymbol = NULL;
+				
 				if (currentNode->type == NODE_TYPE_DECL_FUNCTION) {
-					symbol_add(pSymbolTable, currentNode->tokenList[currentNode->tokenCount - 1].value, SYMBOL_TYPE_FUNCTION, symbolSize, SYMBOL_CLASS_FUNCTION);
+					currentSymbol = symbol_add(pSymbolTable, currentNode->tokenList[currentNode->tokenCount - 1].value, SYMBOL_TYPE_FUNCTION, symbolSize, SYMBOL_CLASS_FUNCTION);
 				} else if (currentNode->type == NODE_TYPE_DECL_VARIABLE) {
-					symbol_add(pSymbolTable, currentNode->tokenList[currentNode->tokenCount - 1].value, SYMBOL_TYPE_VARIABLE, symbolSize, SYMBOL_CLASS_VARIABLE);
+					currentSymbol = symbol_add(pSymbolTable, currentNode->tokenList[currentNode->tokenCount - 1].value, SYMBOL_TYPE_VARIABLE, symbolSize, SYMBOL_CLASS_VARIABLE);
 				}
+				
+				// Set the symbol linkage and location appropriately
+				currentSymbol->linkage = linkage;
+				currentSymbol->location = location;
 				
 			}
 			
 		} else {
 			
+			error_table_push(pErrorTable, ERROR_SYNTACTIC_EXPECTED_IDENTIFIER, currentNode);
+			
 			currentNode->type = NODE_TYPE_INVALID;
+			
+			// Panic relevant to this being a function or variable, and if it is a function, check if it is a declaration or definition
+			if (peek(0).type == TOKEN_TYPE_PT_OPEN_PAREN)
+				if (location == SYMBOL_LOCATION_EXTERNAL)
+					panic(TOKEN_TYPE_PT_SEMICOLON);
+				else
+					panic(TOKEN_TYPE_PT_CLOSE_BRACE);
+			else
+				panic(TOKEN_TYPE_PT_SEMICOLON);
+			
+			advance(1);
+			
+			return currentNode;
 			
 		}
 		
@@ -500,38 +631,226 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 		
 	}
 	
-	// Handle all keywords, which usually have children
+	// Handle all keywords
 	if (token_isKeyword(startToken->type)) {
 		
 		currentNode->type = NODE_TYPE_STATEMENT;
 		
-		if (startToken->type == TOKEN_TYPE_KW_RETURN) {
+		switch (startToken->type) {
 			
-			(pStream->index)++;
+			case (TOKEN_TYPE_KW_RETURN) {
+				
+				advance(1);
+				
+				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+				
+				if (peek(0).type != TOKEN_TYPE_PT_SEMICOLON)
+					error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_SEMICOLON, currentNode);
+				else
+					advance(1);
+				
+			} break;
 			
-			currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+			case (TOKEN_TYPE_KW_EXPORT) {
+				
+				advance(1);
+				
+				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+				
+				if (currentNode->firstChild->type != NODE_TYPE_DECL_FUNCTION)
+					if (peek(0).type != TOKEN_TYPE_PT_SEMICOLON)
+						error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_SEMICOLON, currentNode);
+					else
+						advance(1);
+				
+			} break;
 			
-		} else if (startToken->type == TOKEN_TYPE_KW_EXPORT) {
+			case (TOKEN_TYPE_KW_IMPORT) {
+				
+				advance(1);
 			
-			(pStream->index)++;
+				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+				
+				if (peek(0).type != TOKEN_TYPE_PT_SEMICOLON)
+					error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_SEMICOLON, currentNode);
+				else
+					advance(1);
+				
+			} break;
 			
-			currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+			case (TOKEN_TYPE_KW_MODULE) {
+				
+				advance(1);
 			
-			(pStream->index)++;
+				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+				
+			} break;
 			
-		} else if (startToken->type == TOKEN_TYPE_KW_IMPORT) {
+			case (TOKEN_TYPE_KW_WHILE) {
+				
+				advance(1);
+				
+				if (peek(0).type != TOKEN_TYPE_PT_OPEN_PAREN) {
+					
+					error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_PAREN, currentNode);
+					
+					currentNode->type = NODE_TYPE_INVALID;
+					
+					panic(TOKEN_TYPE_PT_CLOSE_PAREN);
+					
+					return currentNode;
+					
+				} else
+					advance(1);
+				
+				// Create a new condition node
+				node* conditionNode = node_new(NODE_TYPE_CONDITION, currentNode);
+				currentNode->firstChild = conditionNode;
+				
+				// Get the condition
+				conditionNode->firstChild = node_parse(pStream, conditionNode, pSymbolTable, pErrorTable);
+				node* thisNode = conditionNode->firstChild;
+				
+				while (peek(0).type != TOKEN_TYPE_PT_CLOSE_PAREN) {
+					
+					thisNode->nextSibling = node_parse(pStream, conditionNode, pSymbolTable, pErrorTable);
+					thisNode = thisNode->nextSibling;
+					
+				}
+				
+				advance(1);
+				
+				// Create a new scope node
+				node* scopeNode = node_new(NODE_TYPE_SCOPE, currentNode);
+				conditionNode->nextSibling = scopeNode;
+				
+				// Check if this is a one-liner
+				if (peek(0).type == TOKEN_TYPE_PT_OPEN_BRACE) {
+					
+					advance(1);
+					
+					if (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
+						
+						scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+						node* thisNode = scopeNode->firstChild;
+						
+						while (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
+							
+							thisNode->nextSibling = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+							thisNode = thisNode->nextSibling;
+							
+						}
+						
+					}
+					
+					advance(1);
+					
+				} else {
+					
+					scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+					
+				}
+				
+			} break;
 			
-			(pStream->index)++;
-			
-			currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
-			
-			(pStream->index)++;
-			
-		} else if (startToken->type == TOKEN_TYPE_KW_MODULE) {
-			
-			(pStream->index)++;
-			
-			currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+			case (TOKEN_TYPE_KW_IF) {
+				
+				// Create a new condition node
+				node* conditionNode = node_new(NODE_TYPE_CONDITION, currentNode);
+				currentNode->firstChild = conditionNode;
+				
+				advance(1);
+				
+				while (1) {
+					
+					// Be sure this isn't an "else" condition
+					if (conditionNode->type != NODE_TYPE_CONDITION_ELSE) {
+						
+						if (peek(0).type != TOKEN_TYPE_PT_OPEN_PAREN) {
+						
+							error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_PAREN, currentNode);
+							
+							currentNode->type = NODE_TYPE_INVALID;
+							
+							panic(TOKEN_TYPE_PT_CLOSE_PAREN);
+							
+							return currentNode;
+							
+						} else
+							advance(1);
+						
+						// Get the condition
+						conditionNode->firstChild = node_parse(pStream, conditionNode, pSymbolTable, pErrorTable);
+						node* thisNode = conditionNode->firstChild;
+						
+						while (peek(0).type != TOKEN_TYPE_PT_CLOSE_PAREN) {
+							
+							thisNode->nextSibling = node_parse(pStream, conditionNode, pSymbolTable, pErrorTable);
+							thisNode = thisNode->nextSibling;
+							
+						}
+						
+					}
+					
+					advance(1);
+					
+					// Create a new scope node
+					node* scopeNode = node_new(NODE_TYPE_SCOPE, currentNode);
+					conditionNode->nextSibling = scopeNode;
+					
+					// Check if this is a one-liner
+					if (peek(0).type == TOKEN_TYPE_PT_OPEN_BRACE) {
+						
+						advance(1);
+						
+						if (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
+							
+							scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+							node* thisNode = scopeNode->firstChild;
+							
+							while (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
+								
+								thisNode->nextSibling = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+								thisNode = thisNode->nextSibling;
+								
+							}
+							
+						}
+						
+						advance(1);
+						
+					} else {
+						
+						scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+						
+					}
+					
+					// Check if there is another condition to resolve
+					if (peek(0).type == TOKEN_TYPE_KW_ELSE) {
+						
+						// Create a new condition node
+						scopeNode->nextSibling = node_new(NODE_TYPE_CONDITION, currentNode);
+						conditionNode = scopeNode->nextSibling;
+						
+						// Advance past the "else" keyword
+						advance(1);
+						
+						if (peek(0).type == TOKEN_TYPE_KW_IF)
+							advance(1);
+						else
+							conditionNode->type = NODE_TYPE_CONDITION_ELSE;
+						
+					} else {
+						
+						advance(1);
+						
+						break;
+						
+					}
+					
+				}
+				
+			} break;
 			
 		}
 		
@@ -540,7 +859,7 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 	}
 	
 	// If nothing matched, simply prevent the compiler hanging
-	(pStream->index)++;
+	advance(1);
 	
 	// Return the current node
 	return currentNode;

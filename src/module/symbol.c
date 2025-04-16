@@ -113,17 +113,38 @@ void symbol_table_print(symbol_table* pSymbolTable) {
 		
 		symbol* thisSymbol = &pSymbolTable->buffer[i];
 		
-		print_utf8("Symbol \"%s\":\n", thisSymbol->identifier);
+		print_utf8("Symbol \"%s\":\t", thisSymbol->identifier);
 		print_utf8("Type: %s",
 			(thisSymbol->type == SYMBOL_TYPE_FUNCTION) ? "FUNCTION" :
 			(thisSymbol->type == SYMBOL_TYPE_VARIABLE) ? "VARIABLE" :
 			(thisSymbol->type == SYMBOL_TYPE_MODULE) ? "MODULE" :
-			(thisSymbol->type == SYMBOL_TYPE_HEADER) ? "MODULE" :
+			(thisSymbol->type == SYMBOL_TYPE_HEADER) ? "HEADER" :
 			(thisSymbol->type == SYMBOL_TYPE_TYPE) ? "TYPE" :
 			(thisSymbol->type == SYMBOL_TYPE_LITERAL) ? "LITERAL" :
 			"UNKNOWN"
 		);
-		print_utf8("\n");
+		print_utf8(" | Size: %d", thisSymbol->size);
+		print_utf8(" | Class: %s",
+			(thisSymbol->class == SYMBOL_CLASS_FUNCTION) ? "FUNCTION" :
+			(thisSymbol->class == SYMBOL_CLASS_VARIABLE) ? "VARIABLE" :
+			(thisSymbol->class == SYMBOL_CLASS_TYPE) ? "TYPE" :
+			(thisSymbol->class == SYMBOL_CLASS_MODULE) ? "MODULE" :
+			(thisSymbol->class == SYMBOL_CLASS_HEADER) ? "HEADER" :
+			(thisSymbol->class == SYMBOL_CLASS_LITERAL) ? "LITERAL" :
+			(thisSymbol->class == SYMBOL_CLASS_ALL) ? "ALL" :
+			"UNKNOWN"
+		);
+		print_utf8(" | Linkage: %s",
+			(thisSymbol->linkage == SYMBOL_LINKAGE_GLOBAL) ? "GLOBAL" :
+			(thisSymbol->linkage == SYMBOL_LINKAGE_LOCAL) ? "LOCAL" :
+			"UNKNOWN"
+		);
+		print_utf8(" | Location: %s",
+			(thisSymbol->location == SYMBOL_LOCATION_INTERNAL) ? "INTERNAL" :
+			(thisSymbol->location == SYMBOL_LOCATION_EXTERNAL) ? "EXTERNAL" :
+			"UNKNOWN"
+		);
+		print_utf8("\n", thisSymbol->linkage, thisSymbol->location);
 		
 	}
 	

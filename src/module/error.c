@@ -90,6 +90,9 @@ void error_table_print(error_table* pErrorTable) {
 			(pErrorTable->errorBuffer[i] == ERROR_SYNTACTIC_MISSING_BRACKET) ? "Missing bracket" :
 			(pErrorTable->errorBuffer[i] == ERROR_SYNTACTIC_MALFORMED_LITERAL) ? "Malformed literal" :
 			(pErrorTable->errorBuffer[i] == ERROR_SYNTACTIC_MALFORMED_COMMENT) ? "Malformed comment" :
+			(pErrorTable->errorBuffer[i] == ERROR_SYNTACTIC_EXPECTED_TYPE) ? "Expected type" :
+			(pErrorTable->errorBuffer[i] == ERROR_SYNTACTIC_EXPECTED_IDENTIFIER) ? "Expected identifier" :
+			(pErrorTable->errorBuffer[i] == ERROR_SYNTACTIC_EXPECTED_OPERATOR) ? "Expected operator" :
 			(pErrorTable->errorBuffer[i] == ERROR_SEMANTIC_TYPE_MISMATCH)   ? "Type mismatch" :
 			(pErrorTable->errorBuffer[i] == ERROR_SEMANTIC_REDECLARATION)   ? "Redeclaration" :
 			(pErrorTable->errorBuffer[i] == ERROR_SEMANTIC_ARG_MISMATCH)    ? "Argument mismatch" :

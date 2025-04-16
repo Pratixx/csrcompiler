@@ -18,7 +18,6 @@ typedef enum {
 typedef enum {
 	SYMBOL_LINKAGE_GLOBAL,
 	SYMBOL_LINKAGE_LOCAL,
-	SYMBOL_LINKAGE_NONE,
 } symbol_linkage;
 
 typedef enum {
@@ -49,8 +48,7 @@ typedef struct {
 	
 	char identifier[MAX_VALUE_LEN];
 	
-	uint8_t class;
-	
+	symbol_class class;
 	symbol_size size;
 	symbol_type type;
 	symbol_linkage linkage;
