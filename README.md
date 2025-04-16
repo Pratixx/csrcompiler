@@ -15,7 +15,8 @@ The C* compiler is a C-like language which attempts to modernize the C language 
     - [X] Function and variable recognition
     - [X] Loops
     - [X] Conditionals
-    - [X] Switch statements
+    - [ ] Conditional expressions
+    - [ ] Switch statements
     - [ ] Expressions
     - [ ] Statements
 - [ ] IR generation
