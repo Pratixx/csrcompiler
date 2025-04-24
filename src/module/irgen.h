@@ -1,0 +1,74 @@
+#pragma once
+
+// [ DEFINING ] //
+
+typedef enum {
+	
+	// General units
+	UNIT_TYPE_UNDEFINED,
+	
+	UNIT_TYPE_IDENTIFIER,
+	UNIT_TYPE_LITERAL,
+	
+	// Punctuator units
+	UNIT_TYPE_PT_SEMICOLON,
+	UNIT_TYPE_PT_COMMA,
+	UNIT_TYPE_PT_COLON,
+	UNIT_TYPE_PT_POUND,
+	UNIT_TYPE_PT_AMPERSAND,
+	UNIT_TYPE_PT_ASTERISK,
+	UNIT_TYPE_PT_DOLLAR,
+	
+	// Keyword units
+	UNIT_TYPE_KW_FUNC,
+	UNIT_TYPE_KW_PUSH,
+	UNIT_TYPE_KW_POP,
+	UNIT_TYPE_KW_CALL,
+	UNIT_TYPE_KW_RETURN,
+	UNIT_TYPE_KW_JUMP,
+	UNIT_TYPE_KW_EXPORT,
+	UNIT_TYPE_KW_IMPORT,
+	UNIT_TYPE_KW_END,
+	
+	// Type units
+	UNIT_TYPE_TP_UK,
+	
+	UNIT_TYPE_TP_I8,
+	UNIT_TYPE_TP_I16,
+	UNIT_TYPE_TP_I32,
+	UNIT_TYPE_TP_I64,
+	
+	UNIT_TYPE_TP_U8,
+	UNIT_TYPE_TP_U16,
+	UNIT_TYPE_TP_U32,
+	UNIT_TYPE_TP_U64,
+	
+	UNIT_TYPE_TP_F32,
+	UNIT_TYPE_TP_F64,
+	UNIT_TYPE_TP_F128,
+	
+} unit_type;
+
+typedef struct {
+	unit_type type;
+	char value[MAX_VALUE_LEN];
+} unit;
+
+/*////////*/
+
+typedef struct {
+	ast* pAST;
+	symbol_table* pSymbolTable;
+} ir_info;
+
+typedef struct {
+	size_t index;
+	size_t memSize;
+	size_t size;
+	unit* buffer;
+} ir;
+
+// [ FUNCTIONS ] //
+
+bool ir_generate(ir* pIR, ir_info* pInfo);
+void ir_print(ir* pIR);

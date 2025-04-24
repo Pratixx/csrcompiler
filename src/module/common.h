@@ -25,6 +25,8 @@
 #include "stream.h"
 #include "error.h"
 #include "ast.h"
+#include "irgen.h"
+#include "asmgen.h"
 
 // [ DEFINING ] //
 
@@ -36,7 +38,7 @@ struct token_table {
 // Token keyword table
 static struct token_table token_kw_table[] = {
 	
-	// ADD: typeof, alignas, alignof, sizeof
+	// ADD: reflect, alignas, alignof
 	
 	{"return", TOKEN_TYPE_KW_RETURN},
 	
@@ -56,6 +58,7 @@ static struct token_table token_kw_table[] = {
 	{"while",    TOKEN_TYPE_KW_WHILE},
 	{"for",      TOKEN_TYPE_KW_FOR},
 	{"continue", TOKEN_TYPE_KW_CONTINUE},
+	{"exit",     TOKEN_TYPE_KW_EXIT},
 	
 	{"break", TOKEN_TYPE_KW_BREAK},
 	{"jump",  TOKEN_TYPE_KW_JUMP},
@@ -106,12 +109,8 @@ static struct token_table token_op_table[] = {
 	{"<<=", TOKEN_TYPE_OP_ASSIGN_BIT_SHIFT_LEFT},
 	{">>=", TOKEN_TYPE_OP_ASSIGN_BIT_SHIFT_RIGHT},
 	
-	{"&",  TOKEN_TYPE_OP_BIT_AND},
-	{"|",  TOKEN_TYPE_OP_BIT_OR},
-	{"^",  TOKEN_TYPE_OP_BIT_XOR},
-	{"~",  TOKEN_TYPE_OP_BIT_NOT},
-	{"<<", TOKEN_TYPE_OP_BIT_SHIFT_LEFT},
-	{">>", TOKEN_TYPE_OP_BIT_SHIFT_RIGHT},
+	{"++", TOKEN_TYPE_OP_INC},
+	{"--", TOKEN_TYPE_OP_DEC},
 	
 	{"&&", TOKEN_TYPE_OP_CMP_AND},
 	{"||", TOKEN_TYPE_OP_CMP_OR},
@@ -122,15 +121,19 @@ static struct token_table token_op_table[] = {
 	{">=", TOKEN_TYPE_OP_CMP_GREATER_EQUAL},
 	{"!",  TOKEN_TYPE_OP_CMP_NOT},
 	
+	{"&",  TOKEN_TYPE_OP_BIT_AND},
+	{"|",  TOKEN_TYPE_OP_BIT_OR},
+	{"^",  TOKEN_TYPE_OP_BIT_XOR},
+	{"~",  TOKEN_TYPE_OP_BIT_NOT},
+	{"<<", TOKEN_TYPE_OP_BIT_SHIFT_LEFT},
+	{">>", TOKEN_TYPE_OP_BIT_SHIFT_RIGHT},
+	
 	{"=",  TOKEN_TYPE_OP_ASSIGN},
 	{"+=", TOKEN_TYPE_OP_ASSIGN_ADD},
 	{"-=", TOKEN_TYPE_OP_ASSIGN_SUB},
 	{"*=", TOKEN_TYPE_OP_ASSIGN_MUL},
 	{"/=", TOKEN_TYPE_OP_ASSIGN_DIV},
 	{"%=", TOKEN_TYPE_OP_ASSIGN_MOD},
-	
-	{"++", TOKEN_TYPE_OP_INC},
-	{"--", TOKEN_TYPE_OP_DEC},
 	
 	{"+", TOKEN_TYPE_OP_ADD},
 	{"-", TOKEN_TYPE_OP_SUB},
@@ -168,28 +171,8 @@ static struct token_table token_qu_table[] = {
 	{"auto", TOKEN_TYPE_QU_AUTO},
 	{"static", TOKEN_TYPE_QU_STATIC},
 	{"thread_local", TOKEN_TYPE_QU_THREAD_LOCAL},
-	{"static", TOKEN_TYPE_QU_STATIC},
 	
 	{"", TOKEN_TYPE_UNDEFINED}
-	
-};
-
-/*////////*/
-
-struct node_table {
-	token_type token;
-	node_type type;
-};
-
-static struct node_table node_math_table[] = {
-	
-	{TOKEN_TYPE_OP_ADD, NODE_TYPE_MATH_ADD},
-	{TOKEN_TYPE_OP_SUB, NODE_TYPE_MATH_SUB},
-	{TOKEN_TYPE_OP_MUL, NODE_TYPE_MATH_MUL},
-	{TOKEN_TYPE_OP_DIV, NODE_TYPE_MATH_DIV},
-	{TOKEN_TYPE_OP_MOD, NODE_TYPE_MATH_MOD},
-	
-	{TOKEN_TYPE_UNDEFINED, NODE_TYPE_UNDEFINED},
 	
 };
 

@@ -137,20 +137,21 @@ token_type str_isLiteral(const char* str) {
 	
 }
 
-token_type str_isOperator(const char* str) {
+token_type str_isOperator(const char* str, size_t* out) {
 	size_t index = 0;
 	while (token_op_table[index].type != TOKEN_TYPE_UNDEFINED) {
-		if (strncmp(str, token_op_table[index].name, strlen(token_op_table[index].name)) == 0) return token_op_table[index].type;
+		*out = strlen(token_op_table[index].name);
+		if (strncmp(str, token_op_table[index].name, *out) == 0) return token_op_table[index].type;
 		index++;
 	}
 	return TOKEN_TYPE_UNDEFINED;
 }
 
-token_type str_isPunctuator(const char* str) {
+token_type str_isPunctuator(const char* str, size_t* out) {
 	size_t index = 0;
 	while (token_pt_table[index].type != TOKEN_TYPE_UNDEFINED) {
-		
-		if (strncmp(str, token_pt_table[index].name, strlen(token_pt_table[index].name)) == 0) return token_pt_table[index].type;
+		*out = strlen(token_pt_table[index].name);
+		if (strncmp(str, token_pt_table[index].name, *out) == 0) return token_pt_table[index].type;
 		index++;
 		
 	}
@@ -189,6 +190,9 @@ token token_parse(code* pCode) {
 	
 	thisToken.type = TOKEN_TYPE_UNDEFINED;
 	
+	// The total length of the chosen token's string equivalent
+	size_t out;
+	
 	// Append characters and check if they are a valid keyword
 	while (1) {
 		
@@ -220,18 +224,44 @@ token token_parse(code* pCode) {
 		
 		// Only check for an punctuator if the value is less than the maximum punctuator length
 		if (tokenValueIndex < MAX_PUNCTUATOR_LEN) {
-			thisToken.type = str_isPunctuator(thisToken.value);
-			if (thisToken.type != TOKEN_TYPE_UNDEFINED) break;
+			thisToken.type = str_isPunctuator(thisStr, &out);
+			if (thisToken.type != TOKEN_TYPE_UNDEFINED) {
+				
+				// Append the remaining characters to the token value
+				for (size_t i = tokenValueIndex; i < (out + tokenValueIndex); i++) {
+					thisToken.value[i] = thisStr[i];
+				}
+				thisToken.value[out + tokenValueIndex] = '\0';
+				
+				// Increment the code index by the length of the string, minus one to account for the fact we're already on the first character
+				(pCode->index) += (out - 1);
+				
+				break;
+				
+			}
 		}
 		
 		// Only check for an operator if the value is less than the maximum operator length
 		if (tokenValueIndex < MAX_OPERATOR_LEN) {
-			thisToken.type = str_isOperator(thisToken.value);
-			if (thisToken.type != TOKEN_TYPE_UNDEFINED) break;
+			thisToken.type = str_isOperator(thisStr, &out);
+			if (thisToken.type != TOKEN_TYPE_UNDEFINED) {
+				
+				// Append the remaining characters to the token value
+				for (size_t i = tokenValueIndex; i < (out + tokenValueIndex); i++) {
+					thisToken.value[i] = thisStr[i];
+				}
+				thisToken.value[out + tokenValueIndex] = '\0';
+				
+				// Increment the code index by the length of the string, minus one to account for the fact we're already on the first character
+				(pCode->index) += (out - 1);
+				
+				break;
+				
+			}
 		}
 		
 		// If this character is whitespace, an operator, or a punctuator, we should check if this is a literal or keyword
-		if (char_isWhitespace(thisStr[1]) || str_isPunctuator(&thisStr[1]) || str_isOperator(&thisStr[1])) {
+		if (char_isWhitespace(thisStr[1]) || str_isPunctuator(&thisStr[1], &out) || str_isOperator(&thisStr[1], &out)) {
 			
 			// Check if this token is a literal
 			thisToken.type = str_isLiteral(thisToken.value);
@@ -283,7 +313,7 @@ void stream_print(stream* pStream) {
 	while (pStream->buffer[tokenSetIndex].type != TOKEN_TYPE_EOF) {
 		
 		// This is probably the most disgusting thing I've ever written
-		char value[(MAX_VALUE_LEN * 2)] = {};
+		char value[MAX_VALUE_LEN * 2] = {};
 		print_utf8("%s ",
 			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_KW_RETURN) ? "KW_RETURN" :
 			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_KW_IF) ? "KW_IF" :
@@ -314,6 +344,13 @@ void stream_print(stream* pStream) {
 			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_OP_MUL) ? "OP_MUL" :
 			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_OP_DIV) ? "OP_DIV" :
 			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_OP_MOD) ? "OP_MOD" :
+			
+			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_OP_CMP_NOT) ? "OP_CMP_NOT" :
+			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_OP_CMP_OR) ? "OP_CMP_OR" :
+			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_OP_CMP_AND) ? "OP_CMP_AND" :
+			
+			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_OP_INC) ? "OP_INC" :
+			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_OP_DEC) ? "OP_DEC" :
 			
 			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_PT_SEMICOLON) ? "PN_SEMICOLON" :
 			(pStream->buffer[tokenSetIndex].type == TOKEN_TYPE_PT_COMMA) ? "PN_COMMA" :

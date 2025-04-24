@@ -20,8 +20,8 @@ struct {
 	symbol_table symbolTable;
 	error_table errorTable;
 	ast ast;
-	// ir ir;
-	// obj obj;
+	ir ir;
+	asm asm;
 } currentFile;
 
 // [ FUNCTIONS ] //
@@ -161,16 +161,57 @@ int main(int argCount, char* argList[]) {
 	currentFileASTInfo.pErrorTable = &currentFile.errorTable;
 	
 	// Create the AST
-	ast_create(&currentFile.ast, &currentFileASTInfo);
-	
-	ast_print(&currentFile.ast);
+	if (!ast_create(&currentFile.ast, &currentFileASTInfo)) {
+		
+		// Return error
+		return EXIT_FAILURE;
+		
+	}
 	
 	print_utf8("Creation of file AST succeeded.\n");
 	
+	ast_print(&currentFile.ast);
+	
 	error_table_print(&currentFile.errorTable);
+	
+	symbol_table_print(&currentFile.symbolTable);
+	
+	// Define file IR info
+	ir_info currentFileIRInfo = {};
+	currentFileIRInfo.pAST = &currentFile.ast;
+	currentFileIRInfo.pSymbolTable = &currentFile.symbolTable;
+	
+	// Generate the IR
+	if (!ir_generate(&currentFile.ir, &currentFileIRInfo)) {
+		
+		// Return error
+		return EXIT_FAILURE;
+		
+	}
+	
+	ir_print(&currentFile.ir);
+	
+	print_utf8("Generation of file IR succeeded.\n");
+	
+	// Define file IR info
+	asm_info currentFileAsmInfo = {};
+	currentFileAsmInfo.pIR = &currentFile.ir;
+	
+	// Generate the Assembly
+	if (!asm_generate(&currentFile.asm, &currentFileAsmInfo)) {
+		
+		// Return error
+		return EXIT_FAILURE;
+		
+	}
+	
+	asm_print(&currentFile.asm);
+	
+	print_utf8("Generation of file Assembly succeeded.\n");
 	
 	// Print success
 	print_utf8("Creation of file compilation objects succeeded.\n");
+	
 	sleep(2);
 	
 	// Destroy everything

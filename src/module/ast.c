@@ -12,6 +12,7 @@
 // [ MACROS ] //
 
 #define advance(x) ((pStream->index) += (x))
+#define jump(x) (pStream->index) = (x)
 
 #define peek(x) (((pStream->index + (x)) >= pStream->size) ? (token){TOKEN_TYPE_EOF, ""} : (pStream->buffer[pStream->index + (x)]))
 #define upeek(x) (pStream->buffer[pStream->index + (x)])
@@ -107,23 +108,18 @@ bool token_isTypeQualifier(token_type tokenType) {
 
 /*////////*/
 
-bool node_isMath(node_type nodeType) {
-	size_t index = 0;
-	while (node_math_table[index].type != NODE_TYPE_UNDEFINED) {
-		if (node_math_table[index].type == nodeType) return true;
-		index++;
-	}
-	return false;
-}
-
-/*////////*/
-
 void token_resolve(token* pToken, node* pParent, symbol_table* pSymbolTable) {
 	
 	if (pToken->type == TOKEN_TYPE_INVALID) {
 		
 		// Set beforehand
 		pToken->type = TOKEN_TYPE_IDENTIFIER;
+		
+		// Check if this is under a function call
+		if (pParent->type == NODE_TYPE_CALL_FUNCTION) return;
+		
+		// Check if this is a function call
+		if (pToken[1].type == TOKEN_TYPE_PT_OPEN_PAREN) return;
 		
 		// If this follows a type specifier or a type qualifier, it is most likely a type
 		if (token_isTypeSpecifier(pToken[-1].type) || token_isTypeQualifier(pToken[-1].type)) return;
@@ -137,6 +133,13 @@ void token_resolve(token* pToken, node* pParent, symbol_table* pSymbolTable) {
 				// Intentional fallthrough
 				case (TOKEN_TYPE_KW_IF)
 				case (TOKEN_TYPE_KW_WHILE)
+				case (TOKEN_TYPE_KW_NAMESPACE)
+				case (TOKEN_TYPE_KW_JUMP)
+				case (TOKEN_TYPE_KW_SWITCH)
+				case (TOKEN_TYPE_KW_CASE)
+				case (TOKEN_TYPE_KW_RETURN)
+				case (TOKEN_TYPE_KW_USING)
+				case (TOKEN_TYPE_KW_ENUM)
 				
 				return;
 				
@@ -167,17 +170,15 @@ void token_resolve(token* pToken, node* pParent, symbol_table* pSymbolTable) {
 			
 			return;
 			
-		} 
+		} else if (token_isLiteral(pToken[-1].type) || token_isOperator(pToken[-1].type)) {
+			
+			pToken->type = TOKEN_TYPE_OP_MUL;
+			
+			return;
+			
+		}
 		
 	}
-	
-}
-
-/*////////*/
-
-void expression_parse(stream* pStream, size_t tokenIndex, size_t tokenLen) {
-	
-	
 	
 }
 
@@ -221,10 +222,10 @@ void node_print(node* pNode, unsigned int depth) {
 	
 	if (depth > 0) {
 		node* currentNode = pNode;
-		unsigned int currentDepth = depth - 1;
-		unsigned short treeGraph[depth + 1];
+		int currentDepth = depth - 1;
+		unsigned short treeGraph[depth + 1] = {};
 		treeGraph[depth] = L'\0';
-		while (currentNode->parent) {
+		while ((currentNode->parent) && (currentDepth >= 0)) {
 			if (currentDepth == (depth - 1)) {
 				if (currentNode->nextSibling) {
 					treeGraph[currentDepth] = L'├';
@@ -249,19 +250,17 @@ void node_print(node* pNode, unsigned int depth) {
 		(pNode->type == NODE_TYPE_INVALID) ? "INVALID" :
 		(pNode->type == NODE_TYPE_UNDEFINED) ? "UNDEFINED" :
 		(pNode->type == NODE_TYPE_IDENTIFIER) ? "IDENTIFIER" :
-		(pNode->type == NODE_TYPE_LITERAL_CHAR) ? "LITERAL_CHAR" :
-		(pNode->type == NODE_TYPE_LITERAL_STR) ? "LITERAL_STR" :
-		(pNode->type == NODE_TYPE_LITERAL_INT) ? "LITERAL_INT" :
-		(pNode->type == NODE_TYPE_LITERAL_FLOAT) ? "LITERAL_FLOAT" :
+		(pNode->type == NODE_TYPE_LITERAL) ? "LITERAL" :
 		(pNode->type == NODE_TYPE_DECL_FUNCTION) ? "DECL_FUNC" :
 		(pNode->type == NODE_TYPE_DECL_VARIABLE) ? "DECL_VAR" :
 		(pNode->type == NODE_TYPE_DECL_PARAMETER) ? "DECL_PARAM" :
-		(pNode->type == NODE_TYPE_MATH_ADD) ? "MATH_ADD" :
 		(pNode->type == NODE_TYPE_SCOPE) ? "SCOPE" :
 		(pNode->type == NODE_TYPE_CONDITION) ? "CONDITION" :
 		(pNode->type == NODE_TYPE_CONDITION_ELSE) ? "CONDITION_ELSE" :
-		(pNode->type == NODE_TYPE_ASSIGN) ? "ASSIGN" :
+		(pNode->type == NODE_TYPE_OPERATION) ? "OPERATION" :
 		(pNode->type == NODE_TYPE_STATEMENT) ? "STATEMENT" :
+		(pNode->type == NODE_TYPE_EXPRESSION) ? "EXPRESSION" :
+		(pNode->type == NODE_TYPE_CALL_FUNCTION) ? "CALL_FUNC" :
 		"EOF"
 	);
 	
@@ -291,6 +290,357 @@ void node_print(node* pNode, unsigned int depth) {
 // for the next node to be made. For example, "int var = 5;" should start on
 // "int" and end on the token after ";", always.
 
+void expr_parse_merge_un_prefix(node** nodeList, bool* nodeConsumed, size_t i) {
+	
+	// Reference the operands
+	node* right = nodeList[i + 1];
+	
+	// Assign the operands to the operation node
+	nodeList[i]->firstChild = right;
+	
+	right->parent = nodeList[i];
+	
+	// Consume the nodes
+	nodeConsumed[i + 1] = true;
+	nodeConsumed[i] = true;
+	
+	// While we continue to encounter nodes of the same type, replace them
+	for (size_t j = i + 1; nodeList[j] == right; j++) {
+		nodeList[j] = nodeList[i];
+		nodeConsumed[j] = true;
+	}
+	
+}
+
+void expr_parse_merge_un_postfix(node** nodeList, bool* nodeConsumed, size_t i) {
+	
+	// Reference the operands
+	node* left = nodeList[i - 1];
+	
+	// Assign the operands to the operation node
+	nodeList[i]->firstChild = left;
+	
+	left->parent = nodeList[i];
+	
+	// Consume the nodes
+	nodeConsumed[i - 1] = true;
+	nodeConsumed[i] = true;
+	
+	// While we continue to encounter nodes of the same type, replace them
+	for (size_t j = i - 1; nodeList[j] == left; j--) {
+		nodeList[j] = nodeList[i];
+		nodeConsumed[j] = true;
+	}
+	
+}
+
+void expr_parse_merge_bi(node** nodeList, bool* nodeConsumed, size_t i) {
+	
+	// Reference the operands
+	node* left = nodeList[i - 1];
+	node* right = nodeList[i + 1];
+	
+	// Assign the operands to the operation node
+	nodeList[i]->firstChild = left;
+	nodeList[i]->firstChild->nextSibling = right;
+	
+	left->parent = nodeList[i];
+	right->parent = nodeList[i];
+	
+	// Consume the nodes
+	nodeConsumed[i - 1] = true;
+	nodeConsumed[i + 1] = true;
+	nodeConsumed[i] = true;
+	
+	// While we continue to encounter nodes of the same type, replace them
+	for (size_t j = i - 1; nodeList[j] == left; j--) {
+		nodeList[j] = nodeList[i];
+		nodeConsumed[j] = true;
+	}
+	
+	for (size_t j = i + 1; nodeList[j] == right; j++) {
+		nodeList[j] = nodeList[i];
+		nodeConsumed[j] = true;
+	}
+	
+}
+
+node* expr_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, error_table* pErrorTable) {
+	
+	// Get the range of the expression
+	size_t range = 0;
+	int64_t currentDepth = 0;
+	while (token_isOperator(peek(range).type) || token_isLiteral(peek(range).type) || token_isIdentifier(peek(range).type) || (peek(range).type == TOKEN_TYPE_PT_OPEN_PAREN) || (peek(range).type == TOKEN_TYPE_PT_CLOSE_PAREN)) {
+		
+		if (peek(range).type == TOKEN_TYPE_PT_OPEN_PAREN) {
+			currentDepth++;
+		} else if (peek(range).type == TOKEN_TYPE_PT_CLOSE_PAREN) {
+			currentDepth--;
+		}
+		
+		if (currentDepth < 0) {
+			break;
+		};
+		
+		range++;
+		
+		// Attempt to resolve the token in case it is unresolved
+		token_resolve(ppeek(range), pParent, pSymbolTable);
+		
+	}
+	
+	for (size_t i = 0; i < range; i++) printf("%s ", peek(i).value);
+	print_utf8("\n");
+	
+	// Placeholder open and close paren operators
+	node* openParen = node_new(NODE_TYPE_UNDEFINED, NULL);
+	if (!openParen) return NULL;
+	node* closeParen = node_new(NODE_TYPE_UNDEFINED, NULL);
+	if (!closeParen) return NULL;
+	
+	// Create a node for every operator and operand
+	node* nodeList[range];
+	bool nodeConsumed[range] = {};
+	for (size_t i = 0; i < range; i++) {
+		
+		if (peek(i).type == TOKEN_TYPE_PT_OPEN_PAREN) {
+			
+			// We should leave these blank, and the parser can recognize them
+			openParen->tokenCount = 1;
+			openParen->tokenList = ppeek(i);
+			
+			nodeList[i] = openParen;
+			
+		} else if (peek(i).type == TOKEN_TYPE_PT_CLOSE_PAREN) {
+			
+			// We should leave these blank, and the parser can recognize them
+			closeParen->tokenCount = 1;
+			closeParen->tokenList = ppeek(i);
+			
+			nodeList[i] = closeParen;
+			
+		} else {
+			
+			// Create a new node
+			nodeList[i] = node_new(NODE_TYPE_UNDEFINED, NULL);
+			if (!nodeList[i]) return NULL;
+			
+			// Assign the token to the node
+			nodeList[i]->tokenCount = 1;
+			nodeList[i]->tokenList = ppeek(i);
+			
+			// Resolve the token
+			if (token_isIdentifier(peek(i).type)) nodeList[i]->type = NODE_TYPE_IDENTIFIER;
+			if (token_isLiteral(peek(i).type)) nodeList[i]->type = NODE_TYPE_LITERAL;
+			if (token_isOperator(peek(i).type)) nodeList[i]->type = NODE_TYPE_OPERATION;
+			
+		}
+		
+	}
+	
+	// Parse all subexpressions in advance
+	size_t startIndex = (pStream->index);
+	for (size_t i = 0; i < range; i++) {
+		
+		if (nodeList[i] == openParen) {
+			
+			// Jump to the start of the expression
+			advance(i + 1);
+			
+			// Parse the expression
+			node* subExprNode = expr_parse(pStream, pParent, pSymbolTable, pErrorTable);
+			
+			// Get the range of the subexpression
+			size_t subExprRange = (pStream->index + 1) - (startIndex + i);
+			
+			// Assign the subexpression to the node
+			for (size_t j = i; j < i + subExprRange; j++) {
+				nodeList[j] = subExprNode;
+				nodeConsumed[j] = true;
+			}
+			
+			jump(startIndex);
+			
+		}
+		
+	}
+	
+	bool merged = true;
+	
+	while (merged) {
+		
+		merged = false;
+		
+		// Evaluate unary not
+		currentDepth = 0;
+		for (size_t i = 0; i < range; i++) {
+			
+			if (nodeList[i] == openParen)
+				currentDepth++;
+			else if (nodeList[i] == closeParen)
+				currentDepth--;
+			
+			if ((nodeList[i]->tokenList->type == TOKEN_TYPE_OP_CMP_NOT)) {
+				if ((nodeList[i]->type == NODE_TYPE_OPERATION) && (!nodeConsumed[i]) && (currentDepth == 0)) {
+					
+					// Merge the operands into the operator
+					expr_parse_merge_un_prefix(nodeList, nodeConsumed, i);
+					
+					// Note that a merge occurred
+					merged = true;
+					
+				}
+			}
+			
+		}
+		
+		// Evaluate unary negate
+		currentDepth = 0;
+		for (size_t i = 0; i < range; i++) {
+			
+			if (nodeList[i] == openParen)
+				currentDepth++;
+			else if (nodeList[i] == closeParen)
+				currentDepth--;
+			
+			if ((nodeList[i]->tokenList->type == TOKEN_TYPE_OP_SUB)) {
+				if ((nodeList[i]->type == NODE_TYPE_OPERATION) && (!nodeConsumed[i]) && (currentDepth == 0)) {
+					if (((i > 0) && (nodeList[i - 1]->type != NODE_TYPE_LITERAL) && (nodeList[i - 1]->type != NODE_TYPE_IDENTIFIER)) || (i == 0)) {
+						
+						// Merge the operands into the operator
+						expr_parse_merge_un_prefix(nodeList, nodeConsumed, i);
+						
+						// Note that a merge occurred
+						merged = true;
+						
+					}
+				}
+			}
+			
+		}
+		
+		// Evaluate binary multiplication and division
+		currentDepth = 0;
+		for (size_t i = 0; i < range; i++) {
+			
+			if (nodeList[i] == openParen)
+				currentDepth++;
+			else if (nodeList[i] == closeParen)
+				currentDepth--;
+			
+			if ((nodeList[i]->tokenList->type == TOKEN_TYPE_OP_MUL) || (nodeList[i]->tokenList->type == TOKEN_TYPE_OP_DIV)) {
+				if ((nodeList[i]->type == NODE_TYPE_OPERATION) && (!nodeConsumed[i]) && (currentDepth == 0)) {
+					
+					// Merge the operands into the operator
+					expr_parse_merge_bi(nodeList, nodeConsumed, i);
+					
+					// Note that a merge occurred
+					merged = true;
+					
+				}
+			}
+			
+		}
+	
+		// Evaluate binary addition and subtraction
+		currentDepth = 0;
+		for (size_t i = 0; i < range; i++) {
+			
+			if (nodeList[i] == openParen)
+				currentDepth++;
+			else if (nodeList[i] == closeParen)
+				currentDepth--;
+			
+			if ((nodeList[i]->tokenList->type == TOKEN_TYPE_OP_ADD) || (nodeList[i]->tokenList->type == TOKEN_TYPE_OP_SUB)) {
+				if ((nodeList[i]->type == NODE_TYPE_OPERATION) && (!nodeConsumed[i]) && (currentDepth == 0)) {
+					
+					// Merge the operands into the operator
+					expr_parse_merge_bi(nodeList, nodeConsumed, i);
+					
+					// Note that a merge occurred
+					merged = true;
+					
+				}
+			}
+			
+		}
+		
+	}
+	
+	merged = true;
+	
+	while (merged) {
+		
+		merged = false;
+		
+		// Evaluate conditional and
+		currentDepth = 0;
+		for (size_t i = 0; i < range; i++) {
+			
+			if (nodeList[i] == openParen)
+				currentDepth++;
+			else if (nodeList[i] == closeParen)
+				currentDepth--;
+			
+			if (nodeList[i]->tokenList->type == TOKEN_TYPE_OP_CMP_AND) {
+				if ((nodeList[i]->type == NODE_TYPE_OPERATION) && (!nodeConsumed[i]) && (currentDepth == 0)) {
+					
+					// Merge the operands into the operator
+					expr_parse_merge_bi(nodeList, nodeConsumed, i);
+					
+					// Note that a merge occurred
+					merged = true;
+					
+				}
+			}
+			
+		}
+		
+		// Evaluate conditional or
+		currentDepth = 0;
+		for (size_t i = 0; i < range; i++) {
+			
+			if (nodeList[i] == openParen)
+				currentDepth++;
+			else if (nodeList[i] == closeParen)
+				currentDepth--;
+			
+			if (nodeList[i]->tokenList->type == TOKEN_TYPE_OP_CMP_OR) {
+				if ((nodeList[i]->type == NODE_TYPE_OPERATION) && (!nodeConsumed[i]) && (currentDepth == 0)) {
+					
+					// Merge the operands into the operator
+					expr_parse_merge_bi(nodeList, nodeConsumed, i);
+					
+					// Note that a merge occurred
+					merged = true;
+					
+				}
+			}
+			
+		}
+		
+	}
+	
+	// Search up the hierarchy for the root node
+	node* rootNode = nodeList[0];
+	while (rootNode->parent) rootNode = rootNode->parent;
+	
+	advance(range);
+	
+	node_print(rootNode, 0);
+	
+	// Free the temporary open and closing paren nodes
+	node_delete(openParen);
+	node_delete(closeParen);
+	
+	// Parent the current node to the passed parent
+	rootNode->parent = pParent;
+	
+	// Return the expression
+	return rootNode;
+	
+}
+
 node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, error_table* pErrorTable) {
 	
 	// This current node
@@ -310,27 +660,24 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 	// Resolve literals
 	if (token_isLiteral(startToken->type)) {
 		
-		// Get the length of the first token's value
-		size_t valueLen = strlen(currentNode->tokenList[0].value);
+		currentNode->type = NODE_TYPE_LITERAL;
 		
-		char* value = currentNode->tokenList[0].value;
+		// Resolve the next token to see if its a multiplication operator
+		token_resolve(ppeek(1), pParent, pSymbolTable);
 		
-		// Check if this is a char, string, int, or float literal
-		if (value[0] == '\"') {
-			currentNode->type = NODE_TYPE_LITERAL_STR;
-		} else if ((value[0] == '0') && (value[1] == 'x')) {
-			currentNode->type = NODE_TYPE_LITERAL_INT_HEX;
-		} else if (value[0] == '\'') {
-			currentNode->type = NODE_TYPE_LITERAL_CHAR;
-		} else if (isdigit(value[0])) {
-			currentNode->type = NODE_TYPE_LITERAL_INT;
-		} else if (value[valueLen - 1] == 'f') {
-			currentNode->type = NODE_TYPE_LITERAL_FLOAT;
-		} else {
-			currentNode->type = NODE_TYPE_INVALID;
-		}
-		
-		advance(1);
+		// Before we advance, check if we are part of an expression; if not, advance past the literal
+		if (token_isOperator(peek(1).type)) {
+			
+			// Parse this expression
+			node* exprNode = expr_parse(pStream, pParent, pSymbolTable, pErrorTable);
+			
+			// We are part of an expression and can be discarded
+			node_delete(currentNode);
+			
+			return exprNode;
+			
+		} else
+			advance(1);
 		
 		return currentNode;
 		
@@ -339,25 +686,62 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 	// Handle identifiers
 	if (token_isTypeQualifier(startToken->type) || token_isTypeSpecifier(startToken->type) || token_isIdentifier(startToken->type)) {
 		
-		// Check if this is just a regular identifier attached to something else, or if it is really a function or variable
+		// Check if this is a simple, unmodified identifier
 		if (pParent->type == NODE_TYPE_STATEMENT) {
 			
 			switch (pParent->tokenList[0].type) {
 				
 				// Case fallthrough
 				case (TOKEN_TYPE_KW_MODULE)
-				case (TOKEN_TYPE_KW_HEADER)
-				case (TOKEN_TYPE_KW_RETURN)
-				
-				{
+				case (TOKEN_TYPE_KW_NAMESPACE)
+				case (TOKEN_TYPE_KW_JUMP)
+				case (TOKEN_TYPE_KW_SWITCH)
+				case (TOKEN_TYPE_KW_CASE)
+				case (TOKEN_TYPE_KW_RETURN) {
 					
 					currentNode->type = NODE_TYPE_IDENTIFIER;
 					
+					// Advance past the identifier
 					advance(1);
 					
 					return currentNode;
 					
-				};
+				} break;
+				
+				// Using has a special case; we need to differentiate between whether we are the identifier or what we are using
+				case (TOKEN_TYPE_KW_USING) {
+					
+					// If we're followed by a colon, we are the identifier
+					if (peek(1).type == TOKEN_TYPE_PT_COLON) {
+						
+						currentNode->type = NODE_TYPE_IDENTIFIER;
+						
+						// Advance past the identifier
+						advance(1);
+						
+						return currentNode;
+						
+					}
+					
+				}
+				
+				// Enums are also unique; they can either have a value or not
+				case (TOKEN_TYPE_KW_ENUM) {
+					
+					currentNode->type = NODE_TYPE_IDENTIFIER;
+					
+					// Advance past the identifier
+					advance(1);
+					
+					// We expect a semicolon; in the case there isn't one, push an error
+					if (peek(0).type != TOKEN_TYPE_PT_SEMICOLON)
+						error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_SEMICOLON, currentNode);
+					else
+						advance(1);
+					
+					return currentNode;
+					
+				}
 				
 				// In the case this does not meet the above
 				default: break;
@@ -371,7 +755,95 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 			
 			currentNode->type = NODE_TYPE_IDENTIFIER;
 			
+			// Advance past the identifier
 			advance(1);
+			
+			return currentNode;
+			
+		}
+		
+		// Check if this is under a function call
+		if (pParent->type == NODE_TYPE_CALL_FUNCTION) {
+			
+			currentNode->type = NODE_TYPE_IDENTIFIER;
+			
+			// Advance past the identifier
+			advance(1);
+			
+			return currentNode;
+			
+		}
+		
+		// Check if this is a function call
+		if (peek(1).type == TOKEN_TYPE_PT_OPEN_PAREN) {
+			
+			currentNode->type = NODE_TYPE_CALL_FUNCTION;
+			
+			// Advance past the identifier and the open paren
+			advance(2);
+			
+			node* thisNode = NULL;
+				
+			// Get the function arguments; if there are none, skip the closing paren
+			if (peek(0).type != TOKEN_TYPE_PT_CLOSE_PAREN) {
+				
+				// Get the first child of this node
+				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+				thisNode = currentNode->firstChild;
+				
+				// Get the rest of the arguments
+				while (peek(0).type != TOKEN_TYPE_PT_CLOSE_PAREN) {
+					
+					// We expect a comma; in the case it isnt, push an error
+					if (peek(0).type != TOKEN_TYPE_PT_COMMA)
+						error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_COMMA, currentNode);
+					else
+						advance(1);
+					
+					// Get the next sibling
+					thisNode->nextSibling = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+					thisNode = thisNode->nextSibling;
+					
+				}
+				
+			}
+			
+			// Advance past the closing paren
+			advance(1);
+			
+			// We expect a semicolon; in the case it isn't, push an error
+			if (peek(0).type != TOKEN_TYPE_PT_SEMICOLON)
+				error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_SEMICOLON, currentNode);
+			else
+				advance(1);
+			
+			return currentNode;
+			
+		}
+		
+		// See if we're modifying a variable rather than defining one
+		if (token_isOperator(peek(1).type)) {
+			
+			// Advance past the identifier
+			advance(1);
+			
+			currentNode->type = NODE_TYPE_IDENTIFIER;
+			
+			// Create an assignnment node
+			node* thisNode = node_new(NODE_TYPE_OPERATION, currentNode);
+			thisNode->tokenCount = 1;
+			thisNode->tokenList = ppeek(0);
+			currentNode->firstChild = thisNode;
+			
+			// Advance past the operation
+			advance(1);
+			
+			// If we're not hitting a semicolon or closing paren, then it must be a parsable expression
+			if ((peek(0).type != TOKEN_TYPE_PT_CLOSE_PAREN) && (peek(0).type != TOKEN_TYPE_PT_SEMICOLON)) {
+				
+				thisNode->firstChild = node_parse(pStream, thisNode, pSymbolTable, pErrorTable);
+				
+			}
 			
 			return currentNode;
 			
@@ -424,6 +896,19 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 			
 		}
 		
+		// It is at this point we need to check for unnamed variables
+		if (peek(0).type == TOKEN_TYPE_PT_SEMICOLON) {
+			
+			currentNode->type = NODE_TYPE_DECL_VARIABLE;
+			
+			// Advance past the semicolon
+			advance(1);
+			
+			// Jump to the resolver
+			goto resolve;
+			
+		}
+		
 		// Auto skip point
 		auto_skip:
 		if (peek(0).type == TOKEN_TYPE_QU_AUTO) {
@@ -444,42 +929,48 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 			
 		}
 		
-		// Confirm that this was actually resolved into an identifier
+		// Confirm that this was actually resolved into an identifier; in the case we didn't, push an error and panic
 		if (token_isIdentifier(peek(0).type)) {
 			
+			// Advance past the identifier
 			advance(1);
 			
-			// Check for a function
+			// Check for the appropriate assignment
 			if (peek(0).type == TOKEN_TYPE_PT_OPEN_PAREN) {
+				
+				// Advance past the identifier
+				advance(1);
 				
 				currentNode->type = NODE_TYPE_DECL_FUNCTION;
 				
 				node* thisNode = NULL;
 				
-				advance(1);
-				
-				// Get the function parameters
+				// Get the function parameters; if there are none, simply skip the closing paren
 				if (peek(0).type != TOKEN_TYPE_PT_CLOSE_PAREN) {
 					
+					// Get the first child of this node
 					currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
 					thisNode = currentNode->firstChild;
 					
+					// Get the rest of the parameters
 					while (peek(0).type != TOKEN_TYPE_PT_CLOSE_PAREN) {
 						
+						// We expect a comma; in the case it isnt, push an error
 						if (peek(0).type != TOKEN_TYPE_PT_COMMA)
 							error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_COMMA, currentNode);
 						else
 							advance(1);
 						
+						// Get the next sibling
 						thisNode->nextSibling = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
 						thisNode = thisNode->nextSibling;
 						
 					}
 					
-					advance(1);
-					
-				} else
-					advance(2);
+				}
+				
+				// Advance past the closing paren
+				advance(1);
 				
 				// Get the function body
 				if (peek(0).type == TOKEN_TYPE_PT_OPEN_BRACE) {
@@ -487,17 +978,20 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 					// Create a new scope node
 					node* scopeNode = node_new(NODE_TYPE_SCOPE, currentNode);
 					
+					// If there is a previous node, link it to this one
 					if (thisNode)
 						thisNode->nextSibling = scopeNode;
 					else
 						currentNode->firstChild = scopeNode;
 					
-					// Get the first child
+					// Advannce past the open brace
 					advance(1);
 					
-					scopeNode->firstChild = node_parse(pStream, thisNode, pSymbolTable, pErrorTable);
+					// Get the first child of this node
+					scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
 					thisNode = scopeNode->firstChild;
 					
+					// Get the remaining children
 					while (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
 						
 						thisNode->nextSibling = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
@@ -505,11 +999,15 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 						
 					}
 					
+					// Advance past the closing brace
 					advance(1);
 					
 				} else if ((peek(0).type == TOKEN_TYPE_PT_SEMICOLON) && (pParent->type == NODE_TYPE_STATEMENT) && (pParent->tokenList[0].type == TOKEN_TYPE_KW_IMPORT)) {
 					
+					// Advance past the semicolon
 					advance(1);
+					
+					// We're an external import from some other module, so we don't have a definition
 					
 					// Proceed to symbol resolution
 					
@@ -520,23 +1018,29 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 				}
 				
 			} else if (peek(0).type == TOKEN_TYPE_PT_SEMICOLON) {
+				
 				currentNode->type = NODE_TYPE_DECL_VARIABLE;
+				
+				// Advance past the semicolon
 				advance(1);
-			} else if (peek(0).type == TOKEN_TYPE_OP_ASSIGN) {
+				
+			} else if (token_isOperator(peek(0).type)) {
 				
 				currentNode->type = NODE_TYPE_DECL_VARIABLE;
 				
 				// Make an assignnment node
-				node* thisNode = node_new(NODE_TYPE_ASSIGN, currentNode);
-				thisNode->tokenCount = 1;
-				thisNode->tokenList = ppeek(0);
-				currentNode->firstChild = thisNode;
+				node* operationNode = node_new(NODE_TYPE_OPERATION, currentNode);
+				operationNode->tokenCount = 1;
+				operationNode->tokenList = ppeek(0);
+				currentNode->firstChild = operationNode;
 				
 				// Assign the expression to this variable
 				advance(1);
 				
-				thisNode->firstChild = node_parse(pStream, thisNode, pSymbolTable, pErrorTable);
+				// Get the expression
+				operationNode->firstChild = node_parse(pStream, operationNode, pSymbolTable, pErrorTable);
 				
+				// We expect a semicolon; in the case that it isn't, push an error
 				if (peek(0).type != TOKEN_TYPE_PT_SEMICOLON)
 					error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_SEMICOLON, currentNode);
 				else
@@ -561,8 +1065,11 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 				return currentNode;
 			}
 			
+			// Resolution skip point
+			resolve:
+			
 			// Add this symbol to the symbol table
-			if ((currentNode->type == NODE_TYPE_DECL_FUNCTION) || (currentNode->type == NODE_TYPE_DECL_VARIABLE)) {
+			if ((currentNode->type == NODE_TYPE_DECL_FUNCTION) || (currentNode->type == NODE_TYPE_DECL_VARIABLE) || (currentNode->type == NODE_TYPE_DECL_PARAMETER)) {
 				
 				symbol_size symbolSize = SYMBOL_SIZE_BITS_0;
 				
@@ -570,26 +1077,40 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 				size_t count_long = 0;
 				size_t count_short = 0;
 				
+				size_t typeOffset = 0;
+				
+				while (token_isTypeQualifier(currentNode->tokenList[typeOffset].type) || token_isTypeSpecifier(currentNode->tokenList[typeOffset].type)) {
+					typeOffset++;
+				}
+				
 				for (size_t i = 0; i < currentNode->tokenCount; i++) {
 					if (currentNode->tokenList[i].type == TOKEN_TYPE_SP_LONG) count_long++;
 					if (currentNode->tokenList[i].type == TOKEN_TYPE_SP_SHORT) count_short++;
 				}
 				
-				if (strcmp(currentNode->tokenList[currentNode->tokenCount - 2].value, "int") == 0) {
+				if (strcmp(currentNode->tokenList[typeOffset].value, "int") == 0) {
 					if ((count_long + count_short) == 1) {
 						if (count_long == 1) symbolSize = SYMBOL_SIZE_BITS_64;
 						if (count_short == 1) symbolSize = SYMBOL_SIZE_BITS_16;
+					} else {
+						symbolSize = SYMBOL_SIZE_BITS_32;
 					}
-				} else if (strcmp(currentNode->tokenList[currentNode->tokenCount - 2].value, "float") == 0) {
+				} else if (strcmp(currentNode->tokenList[typeOffset].value, "float") == 0) {
 					if ((count_long + count_short) == 1) {
 						if (count_long == 1) symbolSize = SYMBOL_SIZE_BITS_128;
 						if (count_short == 1) symbolSize = SYMBOL_SIZE_BITS_32;
+					} else {
+						symbolSize = SYMBOL_SIZE_BITS_64;
 					}
-				} else if (strcmp(currentNode->tokenList[currentNode->tokenCount - 2].value, "decimal") == 0) {
+				} else if (strcmp(currentNode->tokenList[typeOffset].value, "decimal") == 0) {
 					if ((count_long + count_short) == 1) {
 						if (count_long == 1) symbolSize = SYMBOL_SIZE_BITS_128;
 						if (count_short == 1) symbolSize = SYMBOL_SIZE_BITS_32;
+					} else {
+						symbolSize = SYMBOL_SIZE_BITS_64;
 					}
+				} else if (strcmp(currentNode->tokenList[typeOffset].value, "byte") == 0) {
+					symbolSize = SYMBOL_SIZE_BITS_8;
 				}
 				
 				symbol* currentSymbol = NULL;
@@ -597,6 +1118,8 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 				if (currentNode->type == NODE_TYPE_DECL_FUNCTION) {
 					currentSymbol = symbol_add(pSymbolTable, currentNode->tokenList[currentNode->tokenCount - 1].value, SYMBOL_TYPE_FUNCTION, symbolSize, SYMBOL_CLASS_FUNCTION);
 				} else if (currentNode->type == NODE_TYPE_DECL_VARIABLE) {
+					currentSymbol = symbol_add(pSymbolTable, currentNode->tokenList[currentNode->tokenCount - 1].value, SYMBOL_TYPE_VARIABLE, symbolSize, SYMBOL_CLASS_VARIABLE);
+				} else if (currentNode->type == NODE_TYPE_DECL_PARAMETER) {
 					currentSymbol = symbol_add(pSymbolTable, currentNode->tokenList[currentNode->tokenCount - 1].value, SYMBOL_TYPE_VARIABLE, symbolSize, SYMBOL_CLASS_VARIABLE);
 				}
 				
@@ -621,8 +1144,10 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 			else
 				panic(TOKEN_TYPE_PT_SEMICOLON);
 			
+			// Advance past the last token
 			advance(1);
 			
+			// Return this invalid node
 			return currentNode;
 			
 		}
@@ -631,7 +1156,7 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 		
 	}
 	
-	// Handle all keywords
+	// Handle keywords
 	if (token_isKeyword(startToken->type)) {
 		
 		currentNode->type = NODE_TYPE_STATEMENT;
@@ -640,10 +1165,13 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 			
 			case (TOKEN_TYPE_KW_RETURN) {
 				
+				// Advance past the keyword
 				advance(1);
 				
+				// Get the expression associated with this keyword
 				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
 				
+				// We expect a semicolon; in the case it isn't, push an error
 				if (peek(0).type != TOKEN_TYPE_PT_SEMICOLON)
 					error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_SEMICOLON, currentNode);
 				else
@@ -653,24 +1181,31 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 			
 			case (TOKEN_TYPE_KW_EXPORT) {
 				
+				// Advance past the keyword
 				advance(1);
 				
+				// Get the function, variable, or module associated with this keyword
 				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
 				
-				if (currentNode->firstChild->type != NODE_TYPE_DECL_FUNCTION)
+				// We only expect a semicolon in the case of modules; functions and variables handle themselves
+				if (currentNode->firstChild->tokenList[0].type == TOKEN_TYPE_KW_MODULE) {
 					if (peek(0).type != TOKEN_TYPE_PT_SEMICOLON)
 						error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_SEMICOLON, currentNode);
 					else
 						advance(1);
+				}
 				
 			} break;
 			
 			case (TOKEN_TYPE_KW_IMPORT) {
 				
+				// Advance past the keyword
 				advance(1);
-			
+				
+				// Get the function, variable, or module associated with this keyword
 				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
 				
+				// We expect a semicolon; in the case it isn't, push an error
 				if (peek(0).type != TOKEN_TYPE_PT_SEMICOLON)
 					error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_SEMICOLON, currentNode);
 				else
@@ -680,16 +1215,20 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 			
 			case (TOKEN_TYPE_KW_MODULE) {
 				
+				// Advance past the keyword
 				advance(1);
 			
+				// Get the function, variable, or module associated with this keyword
 				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
 				
 			} break;
 			
 			case (TOKEN_TYPE_KW_WHILE) {
 				
+				// Advance past the keyword
 				advance(1);
 				
+				// We expect an open paren; in the case it isn't, push an error and panic
 				if (peek(0).type != TOKEN_TYPE_PT_OPEN_PAREN) {
 					
 					error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_PAREN, currentNode);
@@ -698,6 +1237,12 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 					
 					panic(TOKEN_TYPE_PT_CLOSE_PAREN);
 					
+					// Advance past the closing paren
+					advance(1);
+					
+					// We hope that the scope exists and that it properly gets parsed
+					
+					// Return this invalid node
 					return currentNode;
 					
 				} else
@@ -709,45 +1254,60 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 				
 				// Get the condition
 				conditionNode->firstChild = node_parse(pStream, conditionNode, pSymbolTable, pErrorTable);
-				node* thisNode = conditionNode->firstChild;
 				
-				while (peek(0).type != TOKEN_TYPE_PT_CLOSE_PAREN) {
+				// We expect a closing paren; in the case it isn't, push an error and panic
+				if (peek(0).type != TOKEN_TYPE_PT_CLOSE_PAREN) {
 					
-					thisNode->nextSibling = node_parse(pStream, conditionNode, pSymbolTable, pErrorTable);
-					thisNode = thisNode->nextSibling;
+					error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_PAREN, currentNode);
 					
-				}
-				
-				advance(1);
+					currentNode->type = NODE_TYPE_INVALID;
+					
+				} else
+					advance(1);
 				
 				// Create a new scope node
 				node* scopeNode = node_new(NODE_TYPE_SCOPE, currentNode);
 				conditionNode->nextSibling = scopeNode;
 				
-				// Check if this is a one-liner
+				// Check if this is a one-liner; if not, parse a whole body until the closing brace
 				if (peek(0).type == TOKEN_TYPE_PT_OPEN_BRACE) {
 					
+					// Advance past the open brace
 					advance(1);
 					
+					// Make sure that there is a populated body; in the case that there isn't, push an error
 					if (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
 						
+						// Get the first child of this node
 						scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
-						node* thisNode = scopeNode->firstChild;
+						node* bodyNode = scopeNode->firstChild;
 						
+						// Get the rest of the children
 						while (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
 							
-							thisNode->nextSibling = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
-							thisNode = thisNode->nextSibling;
+							bodyNode->nextSibling = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+							bodyNode = bodyNode->nextSibling;
 							
 						}
 						
+					} else {
+						
+						error_table_push(pErrorTable, ERROR_SEMANTIC_UNPOPULATED_BODY, currentNode);
+					
+						currentNode->type = NODE_TYPE_INVALID;
+						
+						// No further logic occurs other than advancing past the closing brace
+						
 					}
 					
+					// Advance past the closing brace
 					advance(1);
 					
 				} else {
 					
 					scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+					
+					// The statement we just parsed should have resolved its semicolon, and the error is already pushed if it was not present. Semicolon checks can be omitted here
 					
 				}
 				
@@ -755,17 +1315,20 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 			
 			case (TOKEN_TYPE_KW_IF) {
 				
+				// Advance past the keyword
+				advance(1);
+				
 				// Create a new condition node
 				node* conditionNode = node_new(NODE_TYPE_CONDITION, currentNode);
 				currentNode->firstChild = conditionNode;
 				
-				advance(1);
-				
+				// We run a loop to check for multiple conditions until we encounter the last one
 				while (1) {
 					
-					// Be sure this isn't an "else" condition
+					// Be sure this isn't an else condition; if it is, then it doesn't have a condition and this can be skipped
 					if (conditionNode->type != NODE_TYPE_CONDITION_ELSE) {
 						
+						// We expect an open paren; in the case that it isn't, push an error and panic
 						if (peek(0).type != TOKEN_TYPE_PT_OPEN_PAREN) {
 						
 							error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_PAREN, currentNode);
@@ -774,6 +1337,12 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 							
 							panic(TOKEN_TYPE_PT_CLOSE_PAREN);
 							
+							// Advance past the closing paren
+							advance(1);
+							
+							// We hope that a scope exists and that it properly gets parsed
+							
+							// Return the invalid node
 							return currentNode;
 							
 						} else
@@ -781,60 +1350,78 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 						
 						// Get the condition
 						conditionNode->firstChild = node_parse(pStream, conditionNode, pSymbolTable, pErrorTable);
-						node* thisNode = conditionNode->firstChild;
 						
-						while (peek(0).type != TOKEN_TYPE_PT_CLOSE_PAREN) {
+						// We expect a closing paren; in the case that it isn't, push an error and panic
+						if (peek(0).type != TOKEN_TYPE_PT_CLOSE_PAREN) {
 							
-							thisNode->nextSibling = node_parse(pStream, conditionNode, pSymbolTable, pErrorTable);
-							thisNode = thisNode->nextSibling;
+							error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_PAREN, currentNode);
+							
+							currentNode->type = NODE_TYPE_INVALID;
 							
 						}
 						
+						// Advance past the closing paren
+						advance(1);
+						
 					}
-					
-					advance(1);
 					
 					// Create a new scope node
 					node* scopeNode = node_new(NODE_TYPE_SCOPE, currentNode);
 					conditionNode->nextSibling = scopeNode;
 					
-					// Check if this is a one-liner
+					// Check if this is a one-liner; if not, parse a whole body until the closing brace
 					if (peek(0).type == TOKEN_TYPE_PT_OPEN_BRACE) {
 						
+						// Advance past the open brace
 						advance(1);
 						
+						// Make sure that there is a populated body; in the case that there isn't, push an error
 						if (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
 							
+							// Get the first child of this node
 							scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
-							node* thisNode = scopeNode->firstChild;
+							node* bodyNode = scopeNode->firstChild;
 							
+							// Get the rest of the children
 							while (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
 								
-								thisNode->nextSibling = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
-								thisNode = thisNode->nextSibling;
+								bodyNode->nextSibling = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+								bodyNode = bodyNode->nextSibling;
 								
 							}
 							
+						} else {
+							
+							error_table_push(pErrorTable, ERROR_SEMANTIC_UNPOPULATED_BODY, currentNode);
+						
+							currentNode->type = NODE_TYPE_INVALID;
+							
+							// No further logic occurs other than advancing past the closing brace
+							
 						}
 						
+						// Advance past the closing brace
 						advance(1);
 						
 					} else {
 						
 						scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
 						
+						// The statement we just parsed should have resolved its semicolon, and the error is already pushed if it was not present. Semicolon checks can be omitted here
+						
 					}
 					
-					// Check if there is another condition to resolve
+					// Check if there is another condition to resolve; if not, we're done parsing this if statement
 					if (peek(0).type == TOKEN_TYPE_KW_ELSE) {
+						
+						// Advance past the keyword
+						advance(1);
 						
 						// Create a new condition node
 						scopeNode->nextSibling = node_new(NODE_TYPE_CONDITION, currentNode);
 						conditionNode = scopeNode->nextSibling;
 						
-						// Advance past the "else" keyword
-						advance(1);
-						
+						// Check if this is an else if or an else
 						if (peek(0).type == TOKEN_TYPE_KW_IF)
 							advance(1);
 						else
@@ -842,8 +1429,7 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 						
 					} else {
 						
-						advance(1);
-						
+						// Break out of the loop
 						break;
 						
 					}
@@ -852,7 +1438,595 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 				
 			} break;
 			
+			case (TOKEN_TYPE_KW_SWITCH) {
+				
+				// Advance past the keyword
+				advance(1);
+				
+				// We expect ann open paren; in the case that it isn't, push an error and panic
+				if (peek(0).type != TOKEN_TYPE_PT_OPEN_PAREN) {
+					
+					error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_PAREN, currentNode);
+					
+					currentNode->type = NODE_TYPE_INVALID;
+					
+					panic(TOKEN_TYPE_PT_CLOSE_PAREN);
+					
+					// Advance past the closing paren
+					advance(1);
+					
+					// We hope that a scope still exists and that it properly gets parsed
+					
+					// Return the invalid node
+					return currentNode;
+					
+				} else
+					advance(1);
+				
+				// Create a new identifier node
+				node* expressionNode = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+				currentNode->firstChild = expressionNode;
+				
+				advance(1);
+				
+				// Create a new scope node
+				node* scopeNode = node_new(NODE_TYPE_SCOPE, currentNode);
+				expressionNode->nextSibling = scopeNode;
+				
+				// Get all the cases under this switch statement; if there are none, push an error
+				if (peek(0).type == TOKEN_TYPE_PT_OPEN_BRACE) {
+					
+					// Advance past the open brace
+					advance(1);
+					
+					// Make sure that there is a populated body; in the case that there isn't, push an error
+					if (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
+						
+						// Get the first child of this node
+						scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+						node* thisNode = scopeNode->firstChild;
+						
+						// Get the rest of the children
+						while (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
+							
+							thisNode->nextSibling = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+							thisNode = thisNode->nextSibling;
+							
+						}
+						
+					} else {
+						
+						error_table_push(pErrorTable, ERROR_SEMANTIC_UNPOPULATED_BODY, currentNode);
+					
+						currentNode->type = NODE_TYPE_INVALID;
+						
+						// No further logic occurs other than advancing past the closing brace
+						
+					}
+					
+					// Advance past the closing brace
+					advance(1);
+					
+				} else {
+					
+					error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_BRACE, currentNode);
+					
+				}
+				
+			} break;
+			
+			case (TOKEN_TYPE_KW_CASE) {
+				
+				// Advance past the keyword
+				advance(1);
+				
+				// We expect an open paren; in the case that it isnt, push an error and panic
+				if (peek(0).type != TOKEN_TYPE_PT_OPEN_PAREN) {
+					
+					error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_PAREN, currentNode);
+					
+					currentNode->type = NODE_TYPE_INVALID;
+					
+					panic(TOKEN_TYPE_PT_CLOSE_PAREN);
+					
+					// Advance past the closing paren
+					advance(1);
+					
+					// We hope that a scope still exists and that it properly gets parsed
+					
+					// Return the invalid node
+					return currentNode;
+					
+				} else
+					advance(1);
+				
+				// Parse the expression node
+				node* expressionNode = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+				currentNode->firstChild = expressionNode;
+				
+				// Advance past the closing paren
+				advance(1);
+				
+				// Create a new scope node
+				node* scopeNode = node_new(NODE_TYPE_SCOPE, currentNode);
+				currentNode->firstChild = scopeNode;
+				
+				// Check if this is a one-liner; if not, parse a whole body until the closing brace
+				if (peek(0).type == TOKEN_TYPE_PT_OPEN_BRACE) {
+					
+					// Advance past the open brace
+					advance(1);
+					
+					// Make sure that there is a populated body; in the case that there isn't, push an error
+					if (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
+						
+						// Get the first child of this node
+						scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+						node* bodyNode = scopeNode->firstChild;
+						
+						// Get the rest of the children
+						while (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
+							
+							bodyNode->nextSibling = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+							bodyNode = bodyNode->nextSibling;
+							
+						}
+						
+					} else {
+						
+						error_table_push(pErrorTable, ERROR_SEMANTIC_UNPOPULATED_BODY, currentNode);
+					
+						currentNode->type = NODE_TYPE_INVALID;
+						
+						// No further logic occurs other than advancing past the closing brace
+						
+					}
+					
+					// Advance past the closing brace
+					advance(1);
+					
+				} else {
+					
+					scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+					
+					// The statement we just parsed should have resolved its semicolon, and the error is already pushed if it was not present. Semicolon checks can be omitted here
+					
+				}
+				
+			} break;
+			
+			case (TOKEN_TYPE_KW_ELSE) {
+				
+				// The only time we realistically should ever end up here is if we are in a switch statement
+				
+				// Advance past the keyword
+				advance(1);
+				
+				// Create a new scope node
+				node* scopeNode = node_new(NODE_TYPE_SCOPE, currentNode);
+				currentNode->firstChild = scopeNode;
+				
+				// Check if this is a one-liner; if not, parse a whole body until the closing brace
+				if (peek(0).type == TOKEN_TYPE_PT_OPEN_BRACE) {
+					
+					// Advance past the open brace
+					advance(1);
+					
+					// Make sure that there is a populated body; in the case that there isn't, push an error
+					if (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
+						
+						// Get the first child of this node
+						scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+						node* bodyNode = scopeNode->firstChild;
+						
+						// Get the rest of the children
+						while (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
+							
+							bodyNode->nextSibling = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+							bodyNode = bodyNode->nextSibling;
+							
+						}
+						
+					} else {
+						
+						error_table_push(pErrorTable, ERROR_SEMANTIC_UNPOPULATED_BODY, currentNode);
+					
+						currentNode->type = NODE_TYPE_INVALID;
+						
+						// No further logic occurs other than advancing past the closing brace
+						
+					}
+					
+					// Advance past the closing brace
+					advance(1);
+					
+				} else {
+					
+					scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+					
+					// The statement we just parsed should have resolved its semicolon, and the error is already pushed if it was not present. Semicolon checks can be omitted here
+					
+				}
+				
+			} break;
+			
+			case (TOKEN_TYPE_KW_NAMESPACE) {
+				
+				// Advance past the keyword
+				advance(1);
+				
+				// Get the identifier for this namespace
+				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+				
+				// We expect an opening brace; in the case that it isn't, push an error and panic
+				if (peek(0).type == TOKEN_TYPE_PT_OPEN_BRACE) {
+					
+					// Advance past the open brace
+					advance(1);
+					
+					// Make sure that there is a populated body; in the case that there isn't, push an error
+					if (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
+						
+						// Get the first child of this node
+						node* bodyNode = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+						currentNode->firstChild = bodyNode;
+						
+						// Get the rest of the children
+						while (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
+							
+							bodyNode->nextSibling = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+							bodyNode = bodyNode->nextSibling;
+							
+						}
+						
+					} else {
+						
+						error_table_push(pErrorTable, ERROR_SEMANTIC_UNPOPULATED_BODY, currentNode);
+						
+						currentNode->type = NODE_TYPE_INVALID;
+						
+						// Remaining logic is handled outside this scope
+						
+					}
+					
+					// Advance past the closing brace
+					advance(1);
+					
+				} else {
+				
+					error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_BODY, currentNode);
+					
+					panic(TOKEN_TYPE_PT_CLOSE_BRACE);
+					
+					// No further logic occurs other than advancing past the closing brace
+					
+				}
+				
+			} break;
+			
+			case (TOKEN_TYPE_KW_JUMP) {
+				
+				// Advance past the keyword
+				advance(1);
+				
+				// We expect an identifier node; it is checked later in semantic analysis
+				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+				
+				// Identifiers do not advance past their semicolons, so it's up to us to check it; if there isn't one, push an error
+				if (peek(0).type != TOKEN_TYPE_PT_SEMICOLON)
+					error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_SEMICOLON, currentNode);
+				else
+					advance(1);
+				
+			} break;
+			
+			case (TOKEN_TYPE_KW_FOR) {
+				
+				// Advance past the keyword
+				advance(1);
+				
+				// We expect an open paren; in the case that it isn't, push an error and panic
+				if (peek(0).type != TOKEN_TYPE_PT_OPEN_PAREN) {
+					
+					error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_PAREN, currentNode);
+					
+					currentNode->type = NODE_TYPE_INVALID;
+					
+					panic(TOKEN_TYPE_PT_CLOSE_PAREN);
+					
+					// Advance past the closing paren
+					advance(1);
+					
+					// From here, we hope that a scope will be resolved; it is simply now detached from a parenting for loop
+					
+					// Return this invalid node
+					return currentNode;
+					
+				} else
+					advance(1);
+				
+				// The this node tracks the current node we are on throughout parsing the for loop
+				node* thisNode = NULL;
+				
+				// We expect an initializer node; in the case there isn't one, just skip it
+				if (peek(0).type != TOKEN_TYPE_PT_SEMICOLON) {
+					
+					currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+					thisNode = currentNode->firstChild;
+					
+					// The initializer we just parsed should have resolved its semicolon, and the error is already pushed if it was not present. Semicolon checks can be omitted here
+					
+				} else
+					advance(1);
+				
+				// We expect a condition node; in the case there isn't one, just skip it
+				if (peek(0).type != TOKEN_TYPE_PT_SEMICOLON) {
+					
+					// Create a new condition node
+					node* conditionNode = node_new(NODE_TYPE_CONDITION, currentNode);
+					
+					// If there is a previous node, link it to this one
+					if (thisNode) {
+						thisNode->nextSibling = conditionNode;
+						thisNode = thisNode->nextSibling;
+					} else {
+						currentNode->firstChild = conditionNode;
+						thisNode = currentNode->firstChild;
+					}
+					
+					// Parse the condition
+					conditionNode->firstChild = node_parse(pStream, conditionNode, pSymbolTable, pErrorTable);
+					
+					// Conditions do not advance past their semicolons, so it's up to us to check it; if there isn't one, push an error
+					if (peek(0).type != TOKEN_TYPE_PT_SEMICOLON) {
+						
+						error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_SEMICOLON, currentNode);
+						
+						currentNode->type = NODE_TYPE_INVALID;
+						
+					} else
+						advance(1);
+					
+				} else
+					advance(1);
+				
+				// Get the variable modification if there is one
+				if (peek(0).type != TOKEN_TYPE_PT_CLOSE_PAREN) {
+					
+					// We expect an operation node; in the case there isn't one, just skip it; if there is a previous node, link it to this one
+					if (thisNode) {
+						thisNode->nextSibling = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+						thisNode = thisNode->nextSibling;
+					} else {
+						currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+						thisNode = currentNode->firstChild;
+					}
+					
+					// Operation nodes do not advance past their semicolons, so it's up to us to check it; if there isn't one, push an error
+					if (peek(0).type != TOKEN_TYPE_PT_CLOSE_PAREN) {
+					
+						error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_PAREN, currentNode);
+						
+						currentNode->type = NODE_TYPE_INVALID;
+						
+					} else
+						advance(1);
+					
+				}
+				
+				// Create a new scope node
+				node* scopeNode = node_new(NODE_TYPE_SCOPE, currentNode);
+				
+				// If there is a previous node, link it to this one
+				if (thisNode) {
+					thisNode->nextSibling = scopeNode;
+					thisNode = thisNode->nextSibling;
+				} else {
+					currentNode->firstChild = scopeNode;
+					thisNode = currentNode->firstChild;
+				}
+				
+				// Check if this is a one-liner; if not, parse a whole body until the closing brace
+				if (peek(0).type == TOKEN_TYPE_PT_OPEN_BRACE) {
+					
+					// Advance past the open brace
+					advance(1);
+					
+					// Make sure that there is a populated body; in the case that there isn't, push an error
+					if (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
+						
+						// Get the first child of this node
+						scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+						node* bodyNode = scopeNode->firstChild;
+						
+						// Get the rest of the children
+						while (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
+							
+							bodyNode->nextSibling = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+							bodyNode = bodyNode->nextSibling;
+							
+						}
+						
+					} else {
+						
+						error_table_push(pErrorTable, ERROR_SEMANTIC_UNPOPULATED_BODY, currentNode);
+					
+						currentNode->type = NODE_TYPE_INVALID;
+						
+						// No further logic occurs other than advancing past the closing brace
+						
+					}
+					
+					// Advance past the closing brace
+					advance(1);
+					
+				} else {
+					
+					scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+					
+					// The statement we just parsed should have resolved its semicolon, and the error is already pushed if it was not present. Semicolon checks can be omitted here
+					
+				}
+				
+			} break;
+			
+			case (TOKEN_TYPE_KW_USING) {
+				
+				// Advance past the keyword
+				advance(1);
+				
+				// Get the identifier that we are using
+				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+				node* thisNode = currentNode->firstChild;
+				
+				// We should end up on a colon, as it separates the identifier from what we are using; in case that it isn't, push an error and panic
+				if (peek(0).type != TOKEN_TYPE_PT_COLON) {
+					
+					error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_COLON, currentNode);
+					
+					currentNode->type = NODE_TYPE_INVALID;
+					
+					panic(TOKEN_TYPE_PT_SEMICOLON);
+					
+					// Advance past the semicolon
+					advance(1);
+					
+					// Return this invalid node
+					return currentNode;
+					
+				} else
+					advance(1);
+				
+				// Now get the thing we are using
+				thisNode->nextSibling = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+				
+				// The thing we are using should have resolved its semicolon, and the error is already pushed if it was not present. Semicolon checks can be omitted here
+				
+			} break;
+			
+			// Handle structs, unions, and enums
+			case (TOKEN_TYPE_KW_STRUCT)
+			case (TOKEN_TYPE_KW_ENUM)
+			case (TOKEN_TYPE_KW_UNION) {
+				
+				// Advance past the keyword
+				advance(1);
+				
+				// We expect an open brace; if there isn't one, push an error and panic
+				if (peek(0).type != TOKEN_TYPE_PT_OPEN_BRACE) {
+					
+					error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_BRACE, currentNode);
+					
+					currentNode->type = NODE_TYPE_INVALID;
+					
+					panic(TOKEN_TYPE_PT_CLOSE_BRACE);
+					
+					// We expect a semicolon; if there isn't one, push an error
+					if (peek(0).type != TOKEN_TYPE_PT_SEMICOLON)
+						error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_SEMICOLON, currentNode);
+					else
+						advance(1);
+					
+					// Return this invalid node
+					return currentNode;
+					
+				} else
+					advance(1);
+				
+				// Make sure that there is a populated body; in the case that there isn't, push an error
+				if (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
+					
+					// Get the first child of this node
+					node* bodyNode = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+					currentNode->firstChild = bodyNode;
+					
+					// Get the rest of the children
+					while (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
+						
+						bodyNode->nextSibling = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+						bodyNode = bodyNode->nextSibling;
+						
+					}
+					
+				} else {
+					
+					error_table_push(pErrorTable, ERROR_SEMANTIC_UNPOPULATED_BODY, currentNode);
+					
+					currentNode->type = NODE_TYPE_INVALID;
+					
+					// Remaining logic is handled outside this scope
+					
+				}
+				
+				// Advance past the closing brace
+				advance(1);
+				
+				// We expect a semicolon; if there isn't one, push an error
+				if (peek(0).type != TOKEN_TYPE_PT_SEMICOLON)
+					error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_SEMICOLON, currentNode);
+				else
+					advance(1);
+				
+			} break;
+			
+			// The single-line statements
+			case (TOKEN_TYPE_KW_BREAK)
+			case (TOKEN_TYPE_KW_CONTINUE)
+			case (TOKEN_TYPE_KW_EXIT) {
+				
+				// Advance past the keyword
+				advance(1);
+				
+				// We expect a semicolon; if there isn't one, push an error
+				if (peek(0).type != TOKEN_TYPE_PT_SEMICOLON)
+					error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_SEMICOLON, currentNode);
+				else
+					advance(1);
+				
+			} break;
+			
 		}
+		
+		return currentNode;
+		
+	}
+	
+	// Handle scopes
+	if (startToken->type == TOKEN_TYPE_PT_OPEN_BRACE) {
+		
+		// Advance past the open brace
+		advance(1);
+		
+		// Create a new scope node
+		currentNode->type = NODE_TYPE_SCOPE;
+		
+		// Make sure that there is a populated body; in the case that there isn't, push an error
+		if (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
+			
+			// Get the first child of this node
+			currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+			node* bodyNode = currentNode->firstChild;
+			
+			// Get the rest of the children
+			while (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
+				printf("i rann\n");
+				bodyNode->nextSibling = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+				bodyNode = bodyNode->nextSibling;
+				
+			}
+			
+		} else {
+			
+			error_table_push(pErrorTable, ERROR_SEMANTIC_UNPOPULATED_BODY, currentNode);
+			
+			currentNode->type = NODE_TYPE_INVALID;
+			
+			// Remaining logic is handled outside this scope
+			
+		}
+		
+		// Advance past the closing brace
+		advance(1);
 		
 		return currentNode;
 		
@@ -878,6 +2052,7 @@ bool ast_create(ast* pAST, ast_info* pInfo) {
 	
 	// Create the file node, or the root node
 	node* fileNode = node_new(NODE_TYPE_FILE, NULL);
+	if (!fileNode) return false;
 	
 	// Parse the stream into the AST
 	pInfo->pStream->index = 0;
