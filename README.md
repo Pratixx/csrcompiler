@@ -36,3 +36,11 @@ The inclusion of a module (and header) system will improve symbol tables interna
 ## Legacy Keyword Elimination & New Keyword Addition
 
 Legacy keywords such as `inline` and `register` have been removed due to modern compiler optimizations making them redundant. In addition, many keywords have been replaced by their modern counterparts, such as `auto` now providing type inference and `typedef` being entirely replaced with `using`. Namespaces have also been added solely for the purpose of better encapsulation, used through the `namespace` keyword.
+
+## Improved Programmer Experience
+
+In C, `NULL` is a preprocessor directive; it is not a real keyword. C* changes this by making `NULL` a keyword, used through `null`. Additionally, things such as array declarations have had their syntax shifted from `int var[5]` to `int[5]` var. `true`, `false`, and `bool` are now also keywords. The addition of such is to improve clarity and unity between varying codebases.
+
+## Reflection
+
+C* introduces CTTI (compile-time type information) through the use of the `reflect()` keyword, which provides lots of insight into the type of a variable. It provides the name, size, and much more to improve not only debugging, but program visualization at runtime.
