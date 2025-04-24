@@ -11,15 +11,15 @@ The C* compiler is a C-like language which attempts to modernize the C language 
   - [X] Keywords
   - [X] Punctuators
   - [X] Operators
-- [ ] Parser
+- [X] Parser
     - [X] Function and variable recognition
     - [X] Loops
     - [X] Conditionals
-    - [ ] Conditional expressions
-    - [ ] Switch statements
-    - [ ] Expressions
-    - [ ] Statements
-- [ ] IR generation
+    - [X] Conditional expressions
+    - [X] Switch statements
+    - [X] Expressions
+    - [X] Statements
+- [X] IR generation (partially)
 - [ ] Obj generation
 
 # Features
