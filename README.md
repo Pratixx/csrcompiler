@@ -44,3 +44,23 @@ In C, `NULL` is a preprocessor directive; it is not a real keyword. C* changes t
 ## Reflection
 
 C* introduces CTTI (compile-time type information) through the use of the `reflect()` keyword, which provides lots of insight into the type of a variable. It provides the name, size, and much more to improve not only debugging, but program visualization at runtime.
+
+# C* Program
+
+C* is nowhere near finished, but certain things do compile into a valid Assembly file. For example, the following program will compile into an assemblable and linkable x64 Windows program:
+
+```
+int main(int argc, byte** argv) {
+	
+	return 5 + 3;
+	
+}
+```
+
+# How to Build
+
+C* does not require a build order. Any build tool which includes all the source files will work. Requires a compiler that supports `#pragma once`.
+
+# How to Use
+
+Place a file named `code.csr` in the same directory as the compiled executable. It will open a terminal window for a few seconds which will print out every stage of the compilation. The compiled Assembly can be found at the very bottom after everything else.
