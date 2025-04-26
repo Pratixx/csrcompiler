@@ -15,72 +15,7 @@
 
 // [ FUNCTIONS ] //
 
-
-static bool token_isKeyword(token_type tokenType) {
-	size_t index = 0;
-	while (token_kw_table[index].type != TOKEN_TYPE_UNDEFINED) {
-		if (token_kw_table[index].type == tokenType) return true;
-		index++;
-	}
-	return false;
-}
-
-static bool token_isLiteral(token_type tokenType) {
-	switch (tokenType) {
-		case (TOKEN_TYPE_LITERAL_CHAR) return true;
-		case (TOKEN_TYPE_LITERAL_STR) return true;
-		case (TOKEN_TYPE_LITERAL_INT) return true;
-		case (TOKEN_TYPE_LITERAL_INT_HEX) return true;
-		case (TOKEN_TYPE_LITERAL_FLOAT) return true;
-		default: return false;
-	}
-}
-
-static bool token_isIdentifier(token_type tokenType) {
-	
-	// Immediately return true for actual identifiers
-	if (tokenType == TOKEN_TYPE_IDENTIFIER) return true;
-	return false;
-	
-}
-
-static bool token_isOperator(token_type tokenType) {
-	size_t index = 0;
-	while (token_op_table[index].type != TOKEN_TYPE_UNDEFINED) {
-		if (token_op_table[index].type == tokenType) return true;
-		index++;
-	}
-	return false;
-}
-
-static bool token_isPunctuator(token_type tokenType) {
-	size_t index = 0;
-	while (token_pt_table[index].type != TOKEN_TYPE_UNDEFINED) {
-		if (token_pt_table[index].type == tokenType) return true;
-		index++;
-	}
-	return false;
-}
-
-static bool token_isTypeSpecifier(token_type tokenType) {
-	size_t index = 0;
-	while (token_sp_table[index].type != TOKEN_TYPE_UNDEFINED) {
-		if (token_sp_table[index].type == tokenType) return true;
-		index++;
-	}
-	return false;
-}
-
-static bool token_isTypeQualifier(token_type tokenType) {
-	size_t index = 0;
-	while (token_qu_table[index].type != TOKEN_TYPE_UNDEFINED) {
-		if (token_qu_table[index].type == tokenType) return true;
-		index++;
-	}
-	return false;
-}
-
-/*////////*/
+void unit_push(ir* pIR, unit_type type);
 
 bool ir_resize(ir* pIR) { 
 	
@@ -176,6 +111,64 @@ unit_type eval_type_size(node* pNode, symbol_table* pSymbolTable) {
 	}
 	
 	return UNIT_TYPE_TP_UK;
+	
+}
+
+unit_type eval_arithmetic (node* pNode) {
+	switch (pNode->tokenList->type) {
+		case (TOKEN_TYPE_OP_ADD) return UNIT_TYPE_KW_ADD;
+		case (TOKEN_TYPE_OP_SUB) return UNIT_TYPE_KW_SUB;
+		case (TOKEN_TYPE_OP_MUL) return UNIT_TYPE_KW_MUL;
+		case (TOKEN_TYPE_OP_DIV) return UNIT_TYPE_KW_DIV;
+		default: return UNIT_TYPE_UNDEFINED;
+	}
+}
+
+void emit_expr(ir* pIR, node* pNode, unit_type reg) {
+	
+	if (pNode->type == NODE_TYPE_OPERATION) {
+		
+		if (reg == UNIT_TYPE_UNDEFINED) {
+			
+			unit_push(pIR, UNIT_TYPE_KW_MOVE);
+			unit_push(pIR, UNIT_TYPE_TP_I32);
+			unit_push(pIR, UNIT_TYPE_RG_RG1);
+			unit_push(pIR, UNIT_TYPE_PT_COMMA);
+			
+			pIR->lastRegister = UNIT_TYPE_RG_RG1;
+			pIR->lastRegisterType = UNIT_TYPE_TP_I32;
+			
+		} else {
+			
+			unit_push(pIR, eval_arithmetic(pNode));
+			unit_push(pIR, UNIT_TYPE_TP_I32);
+			unit_push(pIR, UNIT_TYPE_RG_RG1);
+			unit_push(pIR, UNIT_TYPE_PT_COMMA);
+			
+		}
+		
+		emit_expr(pIR, pNode->firstChild, UNIT_TYPE_RG_RG1);
+		
+		unit_push(pIR, UNIT_TYPE_PT_SEMICOLON);
+		
+		if (pNode->firstChild->nextSibling->type != NODE_TYPE_OPERATION) {
+			unit_push(pIR, eval_arithmetic(pNode));
+			unit_push(pIR, UNIT_TYPE_TP_I32);
+			unit_push(pIR, UNIT_TYPE_RG_RG1);
+			unit_push(pIR, UNIT_TYPE_PT_COMMA);
+		}
+		
+		emit_expr(pIR, pNode->firstChild->nextSibling, UNIT_TYPE_RG_RG1);
+		
+		unit_push(pIR, UNIT_TYPE_PT_SEMICOLON);
+		
+	} else if (pNode->type == NODE_TYPE_LITERAL) {
+		
+		unit_push(pIR, UNIT_TYPE_TP_I32);
+		unit_push(pIR, UNIT_TYPE_LITERAL);
+		strcpy(pIR->buffer[pIR->size - 1].value, pNode->tokenList->value);
+		
+	}
 	
 }
 
@@ -301,11 +294,27 @@ void unit_parse(ir* pIR, node* pNode, symbol_table* pSymbolTable) {
 				} break;
 				
 				case (TOKEN_TYPE_KW_RETURN) {
-					unit_push(pIR, UNIT_TYPE_KW_RETURN);
 					unit_parse(pIR, pNode->firstChild, pSymbolTable);
-				}
+					if (pNode->firstChild->type == NODE_TYPE_OPERATION) {
+						unit_push(pIR, UNIT_TYPE_KW_MOVE);
+						unit_push(pIR, pIR->lastRegisterType);
+						unit_push(pIR, UNIT_TYPE_RG_RETVAL);
+						unit_push(pIR, UNIT_TYPE_PT_COMMA);
+						unit_push(pIR, pIR->lastRegisterType);
+						unit_push(pIR, pIR->lastRegister);
+						unit_push(pIR, UNIT_TYPE_PT_SEMICOLON);
+					}
+					unit_push(pIR, UNIT_TYPE_KW_RETURN);
+					unit_push(pIR, UNIT_TYPE_PT_SEMICOLON);
+				} break;
 				
 			}
+		} break;
+		
+		case (NODE_TYPE_OPERATION) {
+			
+			emit_expr(pIR, pNode, UNIT_TYPE_UNDEFINED);
+			
 		} break;
 		
 	}
@@ -324,11 +333,16 @@ void ir_print(ir* pIR) {
 		char value[MAX_VALUE_LEN * 2] = {};
 		print_utf8("%s ", 
 			(pIR->buffer[pIR->index].type == UNIT_TYPE_KW_FUNC) ? "KW_FUNC" :
-			(pIR->buffer[pIR->index].type == UNIT_TYPE_KW_PUSH) ? "KW_PUSH" :
-			(pIR->buffer[pIR->index].type == UNIT_TYPE_KW_POP) ? "KW_POP" :
+			(pIR->buffer[pIR->index].type == UNIT_TYPE_KW_MOVE) ? "KW_MOVE" :
+			(pIR->buffer[pIR->index].type == UNIT_TYPE_RG_RG1) ? "RG_RG1" :
+			(pIR->buffer[pIR->index].type == UNIT_TYPE_RG_RETVAL) ? "RG_RETVAL" :
 			(pIR->buffer[pIR->index].type == UNIT_TYPE_KW_CALL) ? "KW_CALL" :
 			(pIR->buffer[pIR->index].type == UNIT_TYPE_KW_RETURN) ? "KW_RETURN" :
 			(pIR->buffer[pIR->index].type == UNIT_TYPE_KW_JUMP) ? "KW_JUMP" :
+			(pIR->buffer[pIR->index].type == UNIT_TYPE_KW_ADD) ? "KW_ADD" :
+			(pIR->buffer[pIR->index].type == UNIT_TYPE_KW_SUB) ? "KW_SUB" :
+			(pIR->buffer[pIR->index].type == UNIT_TYPE_KW_MUL) ? "KW_MUL" :
+			(pIR->buffer[pIR->index].type == UNIT_TYPE_KW_DIV) ? "KW_DIV" :
 			(pIR->buffer[pIR->index].type == UNIT_TYPE_KW_EXPORT) ? "KW_EXPORT" :
 			(pIR->buffer[pIR->index].type == UNIT_TYPE_KW_IMPORT) ? "KW_IMPORT" :
 			(pIR->buffer[pIR->index].type == UNIT_TYPE_IDENTIFIER) ? strcat(strcat(strcpy(value, "IDENTIFIER ["), pIR->buffer[pIR->index].value), "]") :
@@ -359,6 +373,7 @@ void ir_print(ir* pIR) {
 }
 
 bool ir_generate(ir* pIR, ir_info* pInfo) {
+	
 	
 	// Allocate a buffer for the stream
 	if (ir_resize(pIR) == false) return false;

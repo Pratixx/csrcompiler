@@ -6,10 +6,19 @@ typedef struct {
 	ir* pIR;
 } asm_info;
 
+typedef enum {
+	
+	ASM_MODE_SCAN,
+	ASM_MODE_PARSE,
+	
+} asm_mode;
+
 typedef struct {
 	size_t memSize;
 	size_t size;
 	size_t index;
+	bool found_main;
+	asm_mode mode;
 	char* buffer;
 } asm;
 

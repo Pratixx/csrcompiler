@@ -21,13 +21,17 @@ typedef enum {
 	
 	// Keyword units
 	UNIT_TYPE_KW_FUNC,
-	UNIT_TYPE_KW_PUSH,
-	UNIT_TYPE_KW_POP,
+	UNIT_TYPE_KW_LOCAL,
 	UNIT_TYPE_KW_CALL,
 	UNIT_TYPE_KW_RETURN,
+	UNIT_TYPE_KW_ADD,
+	UNIT_TYPE_KW_SUB,
+	UNIT_TYPE_KW_MUL,
+	UNIT_TYPE_KW_DIV,
 	UNIT_TYPE_KW_JUMP,
 	UNIT_TYPE_KW_EXPORT,
 	UNIT_TYPE_KW_IMPORT,
+	UNIT_TYPE_KW_MOVE,
 	UNIT_TYPE_KW_END,
 	
 	// Type units
@@ -47,6 +51,10 @@ typedef enum {
 	UNIT_TYPE_TP_F64,
 	UNIT_TYPE_TP_F128,
 	
+	// Register units
+	UNIT_TYPE_RG_RETVAL,
+	UNIT_TYPE_RG_RG1,
+	
 } unit_type;
 
 typedef struct {
@@ -65,6 +73,8 @@ typedef struct {
 	size_t index;
 	size_t memSize;
 	size_t size;
+	unit_type lastRegister;
+	unit_type lastRegisterType;
 	unit* buffer;
 } ir;
 

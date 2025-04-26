@@ -10,6 +10,15 @@
 #include <string.h>
 #include <stdarg.h>
 
+// [ MACROS ] //
+
+#define advance(x) ((pIR->index) += (x))
+#define jump(x) (pIR->index) = (x)
+
+#define peek(x) (((pIR->index + (x)) >= pIR->size) ? (unit){UNIT_TYPE_KW_END, ""} : (pIR->buffer[pIR->index + (x)]))
+#define upeek(x) (pIR->buffer[pIR->index + (x)])
+#define ppeek(x) ((pIR->index >= pIR->size + (x)) ? (unit[]){(unit){UNIT_TYPE_KW_END, ""}} : &(pIR->buffer[pIR->index + (x)]))
+
 // [ DEFINING ] //
 
 
@@ -60,6 +69,38 @@ bool asm_resize(asm* pAsm, size_t needed) {
 
 /*////////*/
 
+char* to_reg(unit* pUnit) {
+	switch (pUnit[0].type) {
+		case (UNIT_TYPE_RG_RG1) {
+			switch (pUnit[-1].type) {
+				case (UNIT_TYPE_TP_I32) return "r10d";
+				case (UNIT_TYPE_TP_I64) return "r10";
+				default: return "r10";
+			}
+		}
+		case (UNIT_TYPE_RG_RETVAL) {
+			switch (pUnit[-1].type) {
+				case (UNIT_TYPE_TP_I32) return "eax";
+				case (UNIT_TYPE_TP_I64) return "rax";
+				default: return "rax";
+			}
+		};
+		case (UNIT_TYPE_LITERAL) return pUnit[0].value;	
+		default: "";
+	}
+}
+
+char* to_arith(unit* pUnit) {
+	switch (pUnit[0].type) {
+		case (UNIT_TYPE_KW_MOVE) return "mov";
+		case (UNIT_TYPE_KW_ADD) return "add";
+		case (UNIT_TYPE_KW_SUB) return "sub";
+		case (UNIT_TYPE_KW_MUL) return "mul";
+		case (UNIT_TYPE_KW_DIV) return "div";
+		default: return "UNKNOWN";
+	}
+}
+
 void instruction_push(asm* pAsm, char* msg, ...) {
 	
 	// String to be appended to
@@ -68,58 +109,173 @@ void instruction_push(asm* pAsm, char* msg, ...) {
 	// Appending additional arguments
 	va_list args;
 	va_start(args, msg);
-	vsnprintf(str, sizeof(str), msg, args);
+	size_t len = vsnprintf(str, sizeof(str), msg, args);
 	va_end(args);
 	
-	// Getting string length
-	size_t len = 0;
-	while (str[len] != '\0') {
-		len++;
-	}
-	
 	// Resize if needed
-	asm_resize(pAsm, len);
+	asm_resize(pAsm, len + 1);
 	
 	// Copy the string into the Assembly
-	strncpy(&pAsm->buffer[pAsm->size], str, len);
-
+	memcpy(&pAsm->buffer[pAsm->size], str, len);
+	
 	// Add len to the size
 	pAsm->size += len;
-	
-	// Add a newline
-	pAsm->buffer[pAsm->size] = '\n';
-	
-	// Add the newline
-	pAsm->size++;
 	
 }
 
 void instruction_parse(asm* pAsm, ir* pIR) {
 	
-	// Check the current unit and emit the appropriate instruction
+	static struct {
+		
+		bool funcVisible;
+		bool inFunc;
+		
+	} percall;
+	
+	// Get the current unit
 	unit* currentUnit = &pIR->buffer[pIR->index];
-	switch (currentUnit->type) {
+	
+	if (pAsm->mode == ASM_MODE_SCAN) {
 		
-		// We need to skip FUNC and $ to get the identifier
-		case (UNIT_TYPE_KW_EXPORT) {
-			instruction_push(pAsm, ".global ", currentUnit[3].value);
-		} break;
-		
-		// Functions are handled in bulk
-		case (UNIT_TYPE_KW_FUNC) {
+		// For all functions and variables, move them into the appropriate code sections
+		switch (currentUnit->type) {
 			
-			// Skip the function keyword and dollar
-			(pIR->index) += 2;
+			case (UNIT_TYPE_KW_FUNC) {
+				
+				// Check if this is being imported or exported
+				if ((pIR->index) > 0) {
+					
+					if (peek(-1).type == UNIT_TYPE_KW_EXPORT) {
+						instruction_push(pAsm, ".global ");
+						percall.funcVisible = true;
+					} else if (peek(-1).type == UNIT_TYPE_KW_IMPORT) {
+						instruction_push(pAsm, "extern ");
+						percall.funcVisible = true;
+					}
+					
+					// Advance past this keyword
+					advance(1);
+					
+				} else {
+					
+					// Advance regardless to not hang the compiler
+					advance(1);
+					
+				}
+				
+			} break;
 			
-			// Push the identifier
-			instruction_push(pAsm, currentUnit->value);
+			case (UNIT_TYPE_PT_DOLLAR) {
+				
+				if (percall.funcVisible) {
+					
+					// Emit the function name only if it is being imported or exported
+					instruction_push(pAsm, "%s\n", peek(1).value);
+					
+				}
+				
+				percall.funcVisible = false;
+				percall.inFunc = true;
+				
+				if (strcmp(peek(1).value, "main") == 0) pAsm->found_main = true;
+				
+				// Advance past this and the function name
+				advance(2);
+				
+			} break;
 			
-		} break;
+			case (UNIT_TYPE_KW_RETURN) {
+				
+				percall.inFunc = false;
+				
+			}
+			
+			default: {
+				
+				advance(1);
+				
+			} break;
+			
+		}
 		
 	}
 	
-	// Increment the IR index
-	(pIR->index)++;
+	if (pAsm->mode == ASM_MODE_PARSE) {
+		
+		// Check the current unit and emit the appropriate instruction
+		switch (currentUnit->type) {
+			
+			case (UNIT_TYPE_KW_RETURN) {
+				
+				// Advance past the return keyword
+				advance(1);
+				
+				// Return
+				instruction_push(pAsm, "ret\n");
+				
+			} break;
+			
+			// Functions are handled in bulk
+			case (UNIT_TYPE_KW_FUNC) {
+				
+				// Advance past function keyword and dollar
+				advance(3);
+				
+				// Push the identifier
+				instruction_push(pAsm, "%s:\n", peek(0).value);
+				
+				// Advance past the identifier
+				advance(1);
+				
+				// For the time being, skip all function parameters
+				while (peek(0).type != UNIT_TYPE_PT_SEMICOLON) advance(1);
+				advance(1);
+				
+			} break;
+			
+			case (UNIT_TYPE_PT_COLON) {
+				
+				// We can skip this; it's just syntactic sugar
+				advance(1);
+				
+			} break;
+			
+			// Moving into and out of registers
+			case (UNIT_TYPE_KW_ADD)
+			case (UNIT_TYPE_KW_MOVE) {
+				
+				// Emit this operation
+				instruction_push(pAsm, "%s ", to_arith(ppeek(0)));
+				
+				// Advance past this keyword and the type of the register
+				advance(2);
+				
+				// Push the first register
+				instruction_push(pAsm, "%s, ", to_reg(ppeek(0)));
+				
+				// Advance past the register, comma, and the type
+				advance(3);
+				
+				// Push the second register or literal
+				instruction_push(pAsm, "%s\n", to_reg(ppeek(0)));
+				
+				// Advance past this second register or literal and the semicolon
+				advance(2);
+				
+			} break;
+			
+			default: {
+				
+				print_utf8("Unknown unit\n");
+				
+				// Advance past this unit
+				advance(1);
+				
+			}
+			
+		}
+		
+	}
 	
 }
 
@@ -138,12 +294,36 @@ bool asm_generate(asm* pAsm, asm_info* pInfo) {
 	if (asm_resize(pAsm, 0) == false) return false;
 	
 	// Add new instructions until we reach the end of the unit stream
+	(pAsm->mode) = ASM_MODE_SCAN;
+	(pInfo->pIR->index) = 0;
 	while (1) {
-		if ((pAsm->size) == pAsm->memSize)  if (!asm_resize(pAsm, 0)) return false;
+		
+		if ((pAsm->size) >= pAsm->memSize)  if (!asm_resize(pAsm, 0)) return false;
 		instruction_parse(pAsm, pInfo->pIR);
 		if (pInfo->pIR->buffer[pInfo->pIR->index].type == UNIT_TYPE_KW_END) break;
 		if (pInfo->pIR->index > pInfo->pIR->size) break;
-		(pAsm->size)++;
+	}
+	
+	// Push ExitProcess
+	if (pAsm->found_main) {
+		instruction_push(pAsm, "extern ExitProcess\n");
+	}
+	
+	// Add new instructions until we reach the end of the unit stream
+	(pAsm->mode) = ASM_MODE_PARSE;
+	(pInfo->pIR->index) = 0;
+	while (1) {
+		if ((pAsm->size) >= pAsm->memSize)  if (!asm_resize(pAsm, 0)) return false;
+		instruction_parse(pAsm, pInfo->pIR);
+		if (pInfo->pIR->buffer[pInfo->pIR->index].type == UNIT_TYPE_KW_END) break;
+		if (pInfo->pIR->index > pInfo->pIR->size) break;
+	}
+	
+	// Generate the _start entry point and have it call main
+	if (pAsm->found_main) {
+		instruction_push(pAsm, "_start:\ncall main\n");
+		instruction_push(pAsm, "mov ecx, eax\n");
+		instruction_push(pAsm, "call ExitProcess\n");
 	}
 	
 	// Null terminate the string

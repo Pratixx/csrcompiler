@@ -11,7 +11,7 @@
 
 #define MAX_VALUE_LEN 32
 #define MAX_OPERATOR_LEN 3
-#define MAX_PUNCTUATOR_LEN 2
+#define MAX_PUNCTUATOR_LEN 3
 
 #define case(arg) case arg:
 
@@ -75,6 +75,8 @@ static struct token_table token_kw_table[] = {
 
 // Token punctuator table
 static struct token_table token_pt_table[] = {
+	
+	{"...", TOKEN_TYPE_PT_ELLIPSIS},
 	
 	{";", TOKEN_TYPE_PT_SEMICOLON},
 	{":", TOKEN_TYPE_PT_COLON},
@@ -177,6 +179,14 @@ static struct token_table token_qu_table[] = {
 };
 
 // [ FUNCTIONS ] //
+
+bool token_isKeyword(token_type tokenType);
+bool token_isIdentifier(token_type tokenType);
+bool token_isLiteral(token_type tokenType);
+bool token_isOperator(token_type tokenType);
+bool token_isPunctuator(token_type tokenType);
+bool token_isTypeSpecifier(token_type tokenType);
+bool token_isTypeQualifier(token_type tokenType);
 
 static inline bool char_isWhitespace(char character) {
 	return ((character == ' ') || (character == '\n') || (character == '\t') || (character == '\r'));
