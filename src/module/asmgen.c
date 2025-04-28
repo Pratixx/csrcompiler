@@ -78,6 +78,13 @@ char* to_reg(unit* pUnit) {
 				default: return "r10";
 			}
 		}
+		case (UNIT_TYPE_RG_RG2) {
+			switch (pUnit[-1].type) {
+				case (UNIT_TYPE_TP_I32) return "r11d";
+				case (UNIT_TYPE_TP_I64) return "r11";
+				default: return "r10";
+			}
+		}
 		case (UNIT_TYPE_RG_RETVAL) {
 			switch (pUnit[-1].type) {
 				case (UNIT_TYPE_TP_I32) return "eax";
@@ -95,7 +102,7 @@ char* to_arith(unit* pUnit) {
 		case (UNIT_TYPE_KW_MOVE) return "mov";
 		case (UNIT_TYPE_KW_ADD) return "add";
 		case (UNIT_TYPE_KW_SUB) return "sub";
-		case (UNIT_TYPE_KW_MUL) return "mul";
+		case (UNIT_TYPE_KW_MUL) return "imul";
 		case (UNIT_TYPE_KW_DIV) return "div";
 		default: return "UNKNOWN";
 	}
@@ -177,7 +184,7 @@ void instruction_parse(asm* pAsm, ir* pIR) {
 				percall.funcVisible = false;
 				percall.inFunc = true;
 				
-				if (strcmp(peek(1).value, "main") == 0) pAsm->found_main = true;
+				if (strcmp(peek(1).value, "main") == 0) pAsm->foundMain = true;
 				
 				// Advance past this and the function name
 				advance(2);
@@ -242,6 +249,8 @@ void instruction_parse(asm* pAsm, ir* pIR) {
 			
 			// Moving into and out of registers
 			case (UNIT_TYPE_KW_ADD)
+			case (UNIT_TYPE_KW_SUB)
+			case (UNIT_TYPE_KW_MUL)
 			case (UNIT_TYPE_KW_MOVE) {
 				
 				// Emit this operation
@@ -305,7 +314,7 @@ bool asm_generate(asm* pAsm, asm_info* pInfo) {
 	}
 	
 	// Push ExitProcess
-	if (pAsm->found_main) {
+	if (pAsm->foundMain) {
 		instruction_push(pAsm, "extern ExitProcess\n");
 	}
 	
@@ -320,7 +329,7 @@ bool asm_generate(asm* pAsm, asm_info* pInfo) {
 	}
 	
 	// Generate the _start entry point and have it call main
-	if (pAsm->found_main) {
+	if (pAsm->foundMain) {
 		instruction_push(pAsm, "_start:\ncall main\n");
 		instruction_push(pAsm, "mov ecx, eax\n");
 		instruction_push(pAsm, "call ExitProcess\n");

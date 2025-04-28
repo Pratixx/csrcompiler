@@ -16,6 +16,7 @@
 // [ FUNCTIONS ] //
 
 void unit_push(ir* pIR, unit_type type);
+void unit_copy(ir* pIR, node* pNode, size_t index);
 
 bool ir_resize(ir* pIR) { 
 	
@@ -124,51 +125,196 @@ unit_type eval_arithmetic (node* pNode) {
 	}
 }
 
-void emit_expr(ir* pIR, node* pNode, unit_type reg) {
+unit_type eval_register(size_t count) {
+	switch (count) {
+		case (1) return UNIT_TYPE_RG_RG1;
+		case (2) return UNIT_TYPE_RG_RG2;
+		default: return UNIT_TYPE_RG_UK;
+	}
+}
+
+/*////////*/
+
+void expr_flatten(node* pNode, char flat[], node* nodes[], size_t* index, bool left, bool first) {
+	
+	static size_t registers = 0;
 	
 	if (pNode->type == NODE_TYPE_OPERATION) {
 		
-		if (reg == UNIT_TYPE_UNDEFINED) {
+		expr_flatten(pNode->firstChild, flat, nodes, index, true, false);
+		expr_flatten(pNode->firstChild->nextSibling, flat, nodes, index, false, false);
+		
+		if (registers == 2) {
 			
-			unit_push(pIR, UNIT_TYPE_KW_MOVE);
-			unit_push(pIR, UNIT_TYPE_TP_I32);
-			unit_push(pIR, UNIT_TYPE_RG_RG1);
-			unit_push(pIR, UNIT_TYPE_PT_COMMA);
+			flat[*index] = '^';
+			(*index)++;
 			
-			pIR->lastRegister = UNIT_TYPE_RG_RG1;
-			pIR->lastRegisterType = UNIT_TYPE_TP_I32;
+			char op = 0;
+			switch (pNode->parent->tokenList->type) {
+				case (TOKEN_TYPE_OP_ADD) op = '+'; break;
+				case (TOKEN_TYPE_OP_SUB) op = '-'; break;
+				case (TOKEN_TYPE_OP_MUL) op = '*'; break;
+				case (TOKEN_TYPE_OP_DIV) op = '/'; break;
+			}
 			
-		} else {
+			flat[*index] = op;
+			(*index)++;
 			
-			unit_push(pIR, eval_arithmetic(pNode));
-			unit_push(pIR, UNIT_TYPE_TP_I32);
-			unit_push(pIR, UNIT_TYPE_RG_RG1);
-			unit_push(pIR, UNIT_TYPE_PT_COMMA);
+			registers--;
 			
 		}
-		
-		emit_expr(pIR, pNode->firstChild, UNIT_TYPE_RG_RG1);
-		
-		unit_push(pIR, UNIT_TYPE_PT_SEMICOLON);
-		
-		if (pNode->firstChild->nextSibling->type != NODE_TYPE_OPERATION) {
-			unit_push(pIR, eval_arithmetic(pNode));
-			unit_push(pIR, UNIT_TYPE_TP_I32);
-			unit_push(pIR, UNIT_TYPE_RG_RG1);
-			unit_push(pIR, UNIT_TYPE_PT_COMMA);
-		}
-		
-		emit_expr(pIR, pNode->firstChild->nextSibling, UNIT_TYPE_RG_RG1);
-		
-		unit_push(pIR, UNIT_TYPE_PT_SEMICOLON);
 		
 	} else if (pNode->type == NODE_TYPE_LITERAL) {
 		
-		unit_push(pIR, UNIT_TYPE_TP_I32);
-		unit_push(pIR, UNIT_TYPE_LITERAL);
-		strcpy(pIR->buffer[pIR->size - 1].value, pNode->tokenList->value);
+		if (left) {
+			
+			registers++;
+			
+			flat[*index] = '~';
+			(*index)++;
+			
+		} else {
+			
+			flat[*index] = pNode->parent->tokenList->value[0];
+			(*index)++;
+			
+		}
+		
+		flat[*index] = 'l';
+		nodes[*index] = pNode;
+		(*index)++;
 		
 	}
+	
+	if (first) {
+		registers = 0;
+	}
+	
+}
+
+void expr_parse(ir* pIR, char flat[], node* nodes[], size_t index) {
+	
+	static size_t registers = 0;
+	
+	for (size_t i = 0; i < index; i++) {
+		
+		switch (flat[i]) {
+			
+			case ('~') {
+				
+				registers++;
+				
+				unit_push(pIR, UNIT_TYPE_KW_MOVE);
+				unit_push(pIR, UNIT_TYPE_TP_I32);
+				unit_push(pIR, eval_register(registers));
+				unit_push(pIR, UNIT_TYPE_PT_COMMA);
+				
+			} break;
+			
+			case ('l') {
+				
+				unit_push(pIR, UNIT_TYPE_TP_I32);
+				unit_push(pIR, UNIT_TYPE_LITERAL);
+				unit_copy(pIR, nodes[i], 0);
+				unit_push(pIR, UNIT_TYPE_PT_SEMICOLON);
+				
+			} break;
+			
+			case ('+') {
+				
+				unit_push(pIR, UNIT_TYPE_KW_ADD);
+				unit_push(pIR, UNIT_TYPE_TP_I32);
+				unit_push(pIR, eval_register(registers));
+				unit_push(pIR, UNIT_TYPE_PT_COMMA);
+				
+				if (flat[i - 1] == '^') {
+					unit_push(pIR, UNIT_TYPE_TP_I32);
+					unit_push(pIR, UNIT_TYPE_RG_RG2);
+					unit_push(pIR, UNIT_TYPE_PT_SEMICOLON);
+				}
+				
+			} break;
+			
+			case ('-') {
+				
+				unit_push(pIR, UNIT_TYPE_KW_SUB);
+				unit_push(pIR, UNIT_TYPE_TP_I32);
+				unit_push(pIR, eval_register(registers));
+				unit_push(pIR, UNIT_TYPE_PT_COMMA);
+				
+				if (flat[i - 1] == '^') {
+					unit_push(pIR, UNIT_TYPE_TP_I32);
+					unit_push(pIR, UNIT_TYPE_RG_RG2);
+					unit_push(pIR, UNIT_TYPE_PT_SEMICOLON);
+				}
+				
+			} break;
+			
+			case ('*') {
+				
+				unit_push(pIR, UNIT_TYPE_KW_MUL);
+				unit_push(pIR, UNIT_TYPE_TP_I32);
+				unit_push(pIR, eval_register(registers));
+				unit_push(pIR, UNIT_TYPE_PT_COMMA);
+				
+				if (flat[i - 1] == '^') {
+					unit_push(pIR, UNIT_TYPE_TP_I32);
+					unit_push(pIR, UNIT_TYPE_RG_RG2);
+					unit_push(pIR, UNIT_TYPE_PT_SEMICOLON);
+				}
+				
+			} break;
+			
+			case ('/') {
+				
+				unit_push(pIR, UNIT_TYPE_KW_DIV);
+				unit_push(pIR, UNIT_TYPE_TP_I32);
+				unit_push(pIR, eval_register(registers));
+				unit_push(pIR, UNIT_TYPE_PT_COMMA);
+				
+				if (flat[i - 1] == '^') {
+					unit_push(pIR, UNIT_TYPE_TP_I32);
+					unit_push(pIR, UNIT_TYPE_RG_RG2);
+					unit_push(pIR, UNIT_TYPE_PT_SEMICOLON);
+				}
+				
+			} break;
+			
+			case ('^') {
+				
+				registers--;
+				
+			} break;
+			
+		}
+		
+	}
+
+	registers = 0;
+	
+	// Set the last register to register 1
+	pIR->lastRegister = UNIT_TYPE_RG_RG1;
+	pIR->lastRegisterType = UNIT_TYPE_TP_I32;
+	
+}
+
+void emit_expr(ir* pIR, node* pNode, unit_type reg) {
+	
+	char flat[MAX_ARRAY_LEN] = {};
+	node* nodes[MAX_ARRAY_LEN] = {};
+	size_t index = 0;
+	
+	// Turn our expression into a register-like array
+	expr_flatten(pNode, flat, nodes, &index, false, true);
+	
+	for (size_t i = 0; i < index; i++) {
+		
+		printf("%c ", flat[i]);
+		
+	}
+	
+	// Parse the expression into IR instructions
+	expr_parse(pIR, flat, nodes, index);
 	
 }
 
@@ -186,6 +332,10 @@ void unit_push(ir* pIR, unit_type type) {
 	// Increment the size
 	(pIR->size)++;
 	
+}
+
+void unit_copy(ir* pIR, node* pNode, size_t index) {
+	strcpy(pIR->buffer[pIR->size - 1].value, pNode->tokenList[index].value);
 }
 
 void unit_parse(ir* pIR, node* pNode, symbol_table* pSymbolTable) {
@@ -224,7 +374,7 @@ void unit_parse(ir* pIR, node* pNode, symbol_table* pSymbolTable) {
 			
 			unit_push(pIR, UNIT_TYPE_PT_DOLLAR);
 			unit_push(pIR, UNIT_TYPE_IDENTIFIER);
-			strcpy(pIR->buffer[pIR->size - 1].value, pNode->tokenList[index].value);
+			unit_copy(pIR, pNode, index);
 			
 			// Emit a colon delimiter
 			unit_push(pIR, UNIT_TYPE_PT_COLON);
@@ -244,7 +394,7 @@ void unit_parse(ir* pIR, node* pNode, symbol_table* pSymbolTable) {
 				
 				unit_push(pIR, UNIT_TYPE_PT_POUND);
 				unit_push(pIR, UNIT_TYPE_IDENTIFIER);
-				strcpy(pIR->buffer[pIR->size - 1].value, pNode->tokenList[index].value);
+				unit_copy(pIR, pNode, index);
 				
 				thisNode = thisNode->nextSibling;
 				
@@ -273,7 +423,7 @@ void unit_parse(ir* pIR, node* pNode, symbol_table* pSymbolTable) {
 			
 			// Emit the literal
 			unit_push(pIR, UNIT_TYPE_LITERAL);
-			strcpy(pIR->buffer[pIR->size - 1].value, pNode->tokenList->value);
+			unit_copy(pIR, pNode, 0);
 			
 			// Emit a semicolon
 			unit_push(pIR, UNIT_TYPE_PT_SEMICOLON);
@@ -335,6 +485,7 @@ void ir_print(ir* pIR) {
 			(pIR->buffer[pIR->index].type == UNIT_TYPE_KW_FUNC) ? "KW_FUNC" :
 			(pIR->buffer[pIR->index].type == UNIT_TYPE_KW_MOVE) ? "KW_MOVE" :
 			(pIR->buffer[pIR->index].type == UNIT_TYPE_RG_RG1) ? "RG_RG1" :
+			(pIR->buffer[pIR->index].type == UNIT_TYPE_RG_RG2) ? "RG_RG2" :
 			(pIR->buffer[pIR->index].type == UNIT_TYPE_RG_RETVAL) ? "RG_RETVAL" :
 			(pIR->buffer[pIR->index].type == UNIT_TYPE_KW_CALL) ? "KW_CALL" :
 			(pIR->buffer[pIR->index].type == UNIT_TYPE_KW_RETURN) ? "KW_RETURN" :

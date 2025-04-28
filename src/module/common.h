@@ -12,6 +12,7 @@
 #define MAX_VALUE_LEN 32
 #define MAX_OPERATOR_LEN 3
 #define MAX_PUNCTUATOR_LEN 3
+#define MAX_ARRAY_LEN 128
 
 #define case(arg) case arg:
 

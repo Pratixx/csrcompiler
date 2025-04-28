@@ -17,7 +17,7 @@ typedef struct {
 	size_t memSize;
 	size_t size;
 	size_t index;
-	bool found_main;
+	bool foundMain;
 	asm_mode mode;
 	char* buffer;
 } asm;

@@ -36,9 +36,17 @@
 		} \
 	} while (0)
 
+// [ DEFINING ] //
+
+static struct {
+	
+	bool inExpr;
+	
+} resolve;
+
 // [ FUNCTIONS ] //
 
-node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, error_table* pErrorTable);
+static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, error_table* pErrorTable);
 
 /*////////*/
 
@@ -170,7 +178,7 @@ void token_resolve(token* pToken, node* pParent, symbol_table* pSymbolTable) {
 			
 			return;
 			
-		} else if (token_isLiteral(pToken[-1].type) || token_isOperator(pToken[-1].type)) {
+		} else if (token_isLiteral(pToken[-1].type) || token_isOperator(pToken[-1].type) || resolve.inExpr) {
 			
 			pToken->type = TOKEN_TYPE_OP_MUL;
 			
@@ -184,7 +192,7 @@ void token_resolve(token* pToken, node* pParent, symbol_table* pSymbolTable) {
 
 /*////////*/
 
-node* node_new(node_type type, node* parent) {
+static node* node_new(node_type type, node* parent) {
 	
 	// Allocate a new node
 	node* newNode = (node*)calloc(1, sizeof(node));
@@ -201,7 +209,7 @@ node* node_new(node_type type, node* parent) {
 	
 }
 
-void node_delete(node* pNode) {
+static void node_delete(node* pNode) {
 	
 	// Check if the node has children
 	if (pNode->firstChild) {
@@ -218,7 +226,7 @@ void node_delete(node* pNode) {
 	
 }
 
-void node_print(node* pNode, unsigned int depth) {
+static void node_print(node* pNode, unsigned int depth) {
 	
 	if (depth > 0) {
 		node* currentNode = pNode;
@@ -290,7 +298,7 @@ void node_print(node* pNode, unsigned int depth) {
 // for the next node to be made. For example, "int var = 5;" should start on
 // "int" and end on the token after ";", always.
 
-void expr_parse_merge_un_prefix(node** nodeList, bool* nodeConsumed, size_t i) {
+static void expr_parse_merge_un_prefix(node** nodeList, bool* nodeConsumed, size_t i) {
 	
 	// Reference the operands
 	node* right = nodeList[i + 1];
@@ -312,7 +320,7 @@ void expr_parse_merge_un_prefix(node** nodeList, bool* nodeConsumed, size_t i) {
 	
 }
 
-void expr_parse_merge_un_postfix(node** nodeList, bool* nodeConsumed, size_t i) {
+static void expr_parse_merge_un_postfix(node** nodeList, bool* nodeConsumed, size_t i) {
 	
 	// Reference the operands
 	node* left = nodeList[i - 1];
@@ -334,7 +342,7 @@ void expr_parse_merge_un_postfix(node** nodeList, bool* nodeConsumed, size_t i) 
 	
 }
 
-void expr_parse_merge_bi(node** nodeList, bool* nodeConsumed, size_t i) {
+static void expr_parse_merge_bi(node** nodeList, bool* nodeConsumed, size_t i) {
 	
 	// Reference the operands
 	node* left = nodeList[i - 1];
@@ -365,7 +373,10 @@ void expr_parse_merge_bi(node** nodeList, bool* nodeConsumed, size_t i) {
 	
 }
 
-node* expr_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, error_table* pErrorTable) {
+static node* expr_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, error_table* pErrorTable) {
+	
+	// Mark that we're in an expression
+	resolve.inExpr = true;
 	
 	// Get the range of the expression
 	size_t range = 0;
@@ -636,12 +647,15 @@ node* expr_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 	// Parent the current node to the passed parent
 	rootNode->parent = pParent;
 	
+	// Mark that we're out of an expression
+	resolve.inExpr = false;
+	
 	// Return the expression
 	return rootNode;
 	
 }
 
-node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, error_table* pErrorTable) {
+static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, error_table* pErrorTable) {
 	
 	// This current node
 	node* currentNode = node_new(NODE_TYPE_UNDEFINED, pParent);
@@ -656,6 +670,23 @@ node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, err
 	// Assign the token to the node
 	currentNode->tokenCount = 1;
 	currentNode->tokenList = startToken;
+	
+	// Resolve parentheses
+	if (startToken->type == TOKEN_TYPE_PT_OPEN_PAREN) {
+		
+		if (token_isLiteral(peek(1).type) || token_isIdentifier(peek(1).type)) {
+			
+			// Parse this expression
+			node* exprNode = expr_parse(pStream, pParent, pSymbolTable, pErrorTable);
+			
+			// We are part of an expression and can be discarded
+			node_delete(currentNode);
+			
+			return exprNode;
+			
+		}
+		
+	}
 	
 	// Resolve literals
 	if (token_isLiteral(startToken->type)) {

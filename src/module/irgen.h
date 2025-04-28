@@ -52,8 +52,11 @@ typedef enum {
 	UNIT_TYPE_TP_F128,
 	
 	// Register units
+	UNIT_TYPE_RG_UK,
+	
 	UNIT_TYPE_RG_RETVAL,
 	UNIT_TYPE_RG_RG1,
+	UNIT_TYPE_RG_RG2,
 	
 } unit_type;
 
