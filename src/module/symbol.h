@@ -53,6 +53,7 @@ typedef struct {
 	symbol_type type;
 	symbol_linkage linkage;
 	symbol_location location;
+	size_t scopeIndex;
 	
 	token* typeTokenList;
 	token* paramTokenList;
@@ -65,11 +66,13 @@ typedef struct {
 	size_t memSize;
 	size_t size;
 	symbol* buffer;
+	size_t indicesSize;
+	size_t* indicesBuffer;
 } symbol_table;
 
 // [ FUNCTIONS ] //
 
-symbol* symbol_add(symbol_table* pSymbolTable, char* identifier, symbol_type type, symbol_size size, uint16_t class);
+symbol* symbol_add(symbol_table* pSymbolTable, char* identifier, symbol_type type, symbol_size size, size_t scopeIndex, uint16_t class);
 symbol* symbol_find(symbol_table* pSymbolTable, char* identifier, uint16_t class);
 
 /*////////*/

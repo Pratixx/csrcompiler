@@ -40,6 +40,8 @@ typedef struct node {
 	size_t tokenCount;
 	token* tokenList;
 	
+	size_t scopeIndex;
+	
 } node;
 
 /*////////*/
@@ -53,6 +55,7 @@ typedef struct {
 typedef struct {
 	size_t size;
 	node* root;
+	size_t scopeIndex;
 } ast;
 
 // [ FUNCTIONS ] //

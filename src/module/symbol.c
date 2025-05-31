@@ -54,7 +54,7 @@ bool symbol_table_resize(symbol_table* pSymbolTable) {
 
 /*////////*/
 
-symbol* symbol_add(symbol_table* pSymbolTable, char* identifier, symbol_type type, symbol_size size, uint16_t class) {
+symbol* symbol_add(symbol_table* pSymbolTable, char* identifier, symbol_type type, symbol_size size, size_t scopeIndex, uint16_t class) {
 	
 	// Resize if needed
 	symbol_table_resize(pSymbolTable);
@@ -64,7 +64,31 @@ symbol* symbol_add(symbol_table* pSymbolTable, char* identifier, symbol_type typ
 	pSymbolTable->buffer[pSymbolTable->size].type = type;
 	pSymbolTable->buffer[pSymbolTable->size].size = size;
 	pSymbolTable->buffer[pSymbolTable->size].class = class;
+	pSymbolTable->buffer[pSymbolTable->size].scopeIndex = scopeIndex;
 	(pSymbolTable->size)++;
+	
+	// If this scope index is greater than the current size of the scope index byte list, allocate a new one
+	if (((int64_t)(pSymbolTable->indicesSize) - 1) < (int64_t)(scopeIndex)) {
+		
+		// Allocate a new buffer
+		size_t* new = calloc((scopeIndex + 1), sizeof(size_t));
+		
+		// Copy the memory over
+		memcpy(new, pSymbolTable->indicesBuffer, pSymbolTable->indicesSize * sizeof(size_t));
+		
+		// Free the old memory
+		free(pSymbolTable->indicesBuffer);
+		
+		// Set the old table to the new one
+		pSymbolTable->indicesBuffer = new;
+		
+		// Set the new size
+		pSymbolTable->indicesSize = (scopeIndex + 1);
+		
+	}
+	
+	// Add this size to the scope index
+	pSymbolTable->indicesBuffer[scopeIndex] += size;
 	
 	// Return a pointer to the new symbol
 	return &pSymbolTable->buffer[pSymbolTable->size - 1];
@@ -123,7 +147,7 @@ void symbol_table_print(symbol_table* pSymbolTable) {
 			(thisSymbol->type == SYMBOL_TYPE_LITERAL) ? "LITERAL" :
 			"UNKNOWN"
 		);
-		print_utf8(" | Size: %d", thisSymbol->size);
+		print_utf8(" | Size: %u", thisSymbol->size);
 		print_utf8(" | Class: %s",
 			(thisSymbol->class == SYMBOL_CLASS_FUNCTION) ? "FUNCTION" :
 			(thisSymbol->class == SYMBOL_CLASS_VARIABLE) ? "VARIABLE" :
@@ -139,12 +163,20 @@ void symbol_table_print(symbol_table* pSymbolTable) {
 			(thisSymbol->linkage == SYMBOL_LINKAGE_LOCAL) ? "LOCAL" :
 			"UNKNOWN"
 		);
+		print_utf8(" | Scope Index: %u", thisSymbol->scopeIndex);
 		print_utf8(" | Location: %s",
 			(thisSymbol->location == SYMBOL_LOCATION_INTERNAL) ? "INTERNAL" :
 			(thisSymbol->location == SYMBOL_LOCATION_EXTERNAL) ? "EXTERNAL" :
 			"UNKNOWN"
 		);
 		print_utf8("\n", thisSymbol->linkage, thisSymbol->location);
+		
+	}
+	
+	// Print scope index sizes
+	for (size_t i = 0; i < pSymbolTable->indicesSize; i++) {
+		
+		print_utf8("Scope index %d allocated %d bytes\n", i, pSymbolTable->indicesBuffer[i] / 8);
 		
 	}
 	

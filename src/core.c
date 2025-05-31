@@ -21,7 +21,7 @@ struct {
 	error_table errorTable;
 	ast ast;
 	ir ir;
-	asm asm;
+	assm asm;
 } currentFile;
 
 // [ FUNCTIONS ] //
@@ -36,55 +36,49 @@ __attribute__((constructor)) void init() {
 /*////////*/
 
 void print_utf16(const unsigned short* msg, ...) {
-	
-	// Platform dependent crap
 	HANDLE stdHandle = GetStdHandle(STD_OUTPUT_HANDLE);
 	DWORD written;
 	
-	// String to be appended to
-	unsigned short str[256];
-	
-	// Appending additional arguments
 	va_list args;
 	va_start(args, msg);
-	vsnwprintf(str, sizeof(str), msg, args);
+	int len = _vsnwprintf(NULL, 0, msg, args);
 	va_end(args);
-	
-	// Getting string length
-	size_t len = 0;
-	while (str[len] != '\0') {
-		len++;
-	}
-	
-	// Printing the string
+
+	if (len < 0) return;
+
+	unsigned short* str = malloc((len + 1) * sizeof(unsigned short));
+	if (!str) return;
+
+	va_start(args, msg);
+	vsnwprintf(str, len + 1, msg, args);
+	va_end(args);
+
 	WriteConsoleW(stdHandle, str, (DWORD)len, &written, NULL);
-	
+
+	free(str);
 }
 
 void print_utf8(const char* msg, ...) {
-	
-	// Platform dependent crap
 	HANDLE stdHandle = GetStdHandle(STD_OUTPUT_HANDLE);
 	DWORD written;
 	
-	// String to be appended to
-	char str[256];
-	
-	// Appending additional arguments
 	va_list args;
 	va_start(args, msg);
-	vsnprintf(str, sizeof(str), msg, args);
+	int len = vsnprintf(NULL, 0, msg, args);
 	va_end(args);
-	
-	// Getting string length
-	size_t len = 0;
-	while (str[len] != '\0') {
-		len++;
-	}
-	
-	// Printing the string
+
+	if (len < 0) return;
+
+	char* str = malloc(len + 1);
+	if (!str) return;
+
+	va_start(args, msg);
+	vsnprintf(str, len + 1, msg, args);
+	va_end(args);
+
 	WriteConsoleA(stdHandle, str, (DWORD)len, &written, NULL);
-	
+
+	free(str);
 }
 
 // [ MAIN ] //
@@ -131,16 +125,18 @@ int main(int argCount, char* argList[]) {
 	}
 	
 	// Add recognized identifiers to the symbol table
-	symbol_add(&currentFile.symbolTable, "byte",    SYMBOL_TYPE_TYPE, SYMBOL_SIZE_BITS_8,  SYMBOL_CLASS_TYPE);
-	symbol_add(&currentFile.symbolTable, "int",     SYMBOL_TYPE_TYPE, SYMBOL_SIZE_BITS_32, SYMBOL_CLASS_TYPE);
-	symbol_add(&currentFile.symbolTable, "float",   SYMBOL_TYPE_TYPE, SYMBOL_SIZE_BITS_64, SYMBOL_CLASS_TYPE);
-	symbol_add(&currentFile.symbolTable, "decimal", SYMBOL_TYPE_TYPE, SYMBOL_SIZE_BITS_64, SYMBOL_CLASS_TYPE);
-	symbol_add(&currentFile.symbolTable, "bool",    SYMBOL_TYPE_TYPE, SYMBOL_SIZE_BITS_8,  SYMBOL_CLASS_TYPE);
+	symbol_add(&currentFile.symbolTable, "byte",    SYMBOL_TYPE_TYPE, SYMBOL_SIZE_BITS_8, 0,  SYMBOL_CLASS_TYPE);
+	symbol_add(&currentFile.symbolTable, "int",     SYMBOL_TYPE_TYPE, SYMBOL_SIZE_BITS_32, 0, SYMBOL_CLASS_TYPE);
+	symbol_add(&currentFile.symbolTable, "float",   SYMBOL_TYPE_TYPE, SYMBOL_SIZE_BITS_64, 0, SYMBOL_CLASS_TYPE);
+	symbol_add(&currentFile.symbolTable, "decimal", SYMBOL_TYPE_TYPE, SYMBOL_SIZE_BITS_64, 0, SYMBOL_CLASS_TYPE);
+	symbol_add(&currentFile.symbolTable, "bool",    SYMBOL_TYPE_TYPE, SYMBOL_SIZE_BITS_8, 0,  SYMBOL_CLASS_TYPE);
 	
-	symbol_add(&currentFile.symbolTable, "true",  SYMBOL_TYPE_LITERAL, SYMBOL_SIZE_BITS_0, SYMBOL_CLASS_LITERAL);
-	symbol_add(&currentFile.symbolTable, "false", SYMBOL_TYPE_LITERAL, SYMBOL_SIZE_BITS_0, SYMBOL_CLASS_LITERAL);
+	symbol_add(&currentFile.symbolTable, "true",  SYMBOL_TYPE_LITERAL, SYMBOL_SIZE_BITS_0, 0, SYMBOL_CLASS_LITERAL);
+	symbol_add(&currentFile.symbolTable, "false", SYMBOL_TYPE_LITERAL, SYMBOL_SIZE_BITS_0, 0, SYMBOL_CLASS_LITERAL);
 	
-	symbol_add(&currentFile.symbolTable, "null", SYMBOL_TYPE_LITERAL, SYMBOL_SIZE_BITS_0, SYMBOL_CLASS_LITERAL);
+	symbol_add(&currentFile.symbolTable, "null", SYMBOL_TYPE_LITERAL, SYMBOL_SIZE_BITS_0, 0, SYMBOL_CLASS_LITERAL);
+	
+	symbol_add(&currentFile.symbolTable, "void", SYMBOL_TYPE_TYPE, SYMBOL_SIZE_BITS_0, 0, SYMBOL_CLASS_TYPE);
 	
 	print_utf8("Creation of symbol table succeeded.\n");
 	
@@ -194,18 +190,18 @@ int main(int argCount, char* argList[]) {
 	print_utf8("Generation of file IR succeeded.\n");
 	
 	// Define file IR info
-	asm_info currentFileAsmInfo = {};
+	assm_info currentFileAsmInfo = {};
 	currentFileAsmInfo.pIR = &currentFile.ir;
 	
 	// Generate the Assembly
-	if (!asm_generate(&currentFile.asm, &currentFileAsmInfo)) {
+	if (!assm_generate(&currentFile.asm, &currentFileAsmInfo)) {
 		
 		// Return error
 		return EXIT_FAILURE;
 		
 	}
 	
-	asm_print(&currentFile.asm);
+	assm_print(&currentFile.asm);
 	
 	print_utf8("Generation of file Assembly succeeded.\n");
 	

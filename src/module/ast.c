@@ -46,7 +46,7 @@ static struct {
 
 // [ FUNCTIONS ] //
 
-static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, error_table* pErrorTable);
+static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, error_table* pErrorTable, size_t* pScopeIndex);
 
 /*////////*/
 
@@ -655,10 +655,11 @@ static node* expr_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 	
 }
 
-static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, error_table* pErrorTable) {
+static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTable, error_table* pErrorTable, size_t* pScopeIndex) {
 	
 	// This current node
 	node* currentNode = node_new(NODE_TYPE_UNDEFINED, pParent);
+	currentNode->scopeIndex = *pScopeIndex;
 	if (!currentNode) return NULL;
 	
 	// Define the current token
@@ -819,7 +820,7 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 			if (peek(0).type != TOKEN_TYPE_PT_CLOSE_PAREN) {
 				
 				// Get the first child of this node
-				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable, pScopeIndex);
 				thisNode = currentNode->firstChild;
 				
 				// Get the rest of the arguments
@@ -832,7 +833,7 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 						advance(1);
 					
 					// Get the next sibling
-					thisNode->nextSibling = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+					thisNode->nextSibling = node_parse(pStream, currentNode, pSymbolTable, pErrorTable, pScopeIndex);
 					thisNode = thisNode->nextSibling;
 					
 				}
@@ -872,7 +873,7 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 			// If we're not hitting a semicolon or closing paren, then it must be a parsable expression
 			if ((peek(0).type != TOKEN_TYPE_PT_CLOSE_PAREN) && (peek(0).type != TOKEN_TYPE_PT_SEMICOLON)) {
 				
-				thisNode->firstChild = node_parse(pStream, thisNode, pSymbolTable, pErrorTable);
+				thisNode->firstChild = node_parse(pStream, thisNode, pSymbolTable, pErrorTable, pScopeIndex);
 				
 			}
 			
@@ -980,7 +981,7 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 				if (peek(0).type != TOKEN_TYPE_PT_CLOSE_PAREN) {
 					
 					// Get the first child of this node
-					currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+					currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable, pScopeIndex);
 					thisNode = currentNode->firstChild;
 					
 					// Get the rest of the parameters
@@ -993,7 +994,7 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 							advance(1);
 						
 						// Get the next sibling
-						thisNode->nextSibling = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+						thisNode->nextSibling = node_parse(pStream, currentNode, pSymbolTable, pErrorTable, pScopeIndex);
 						thisNode = thisNode->nextSibling;
 						
 					}
@@ -1009,6 +1010,10 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 					// Create a new scope node
 					node* scopeNode = node_new(NODE_TYPE_SCOPE, currentNode);
 					
+					// Increment the scope index
+					(*pScopeIndex)++;
+					scopeNode->scopeIndex = *pScopeIndex;
+					
 					// If there is a previous node, link it to this one
 					if (thisNode)
 						thisNode->nextSibling = scopeNode;
@@ -1019,13 +1024,13 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 					advance(1);
 					
 					// Get the first child of this node
-					scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+					scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable, pScopeIndex);
 					thisNode = scopeNode->firstChild;
 					
 					// Get the remaining children
 					while (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
 						
-						thisNode->nextSibling = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+						thisNode->nextSibling = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable, pScopeIndex);
 						thisNode = thisNode->nextSibling;
 						
 					}
@@ -1069,7 +1074,7 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 				advance(1);
 				
 				// Get the expression
-				operationNode->firstChild = node_parse(pStream, operationNode, pSymbolTable, pErrorTable);
+				operationNode->firstChild = node_parse(pStream, operationNode, pSymbolTable, pErrorTable, pScopeIndex);
 				
 				// We expect a semicolon; in the case that it isn't, push an error
 				if (peek(0).type != TOKEN_TYPE_PT_SEMICOLON)
@@ -1147,11 +1152,11 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 				symbol* currentSymbol = NULL;
 				
 				if (currentNode->type == NODE_TYPE_DECL_FUNCTION) {
-					currentSymbol = symbol_add(pSymbolTable, currentNode->tokenList[currentNode->tokenCount - 1].value, SYMBOL_TYPE_FUNCTION, symbolSize, SYMBOL_CLASS_FUNCTION);
+					currentSymbol = symbol_add(pSymbolTable, currentNode->tokenList[currentNode->tokenCount - 1].value, SYMBOL_TYPE_FUNCTION, symbolSize, *pScopeIndex, SYMBOL_CLASS_FUNCTION);
 				} else if (currentNode->type == NODE_TYPE_DECL_VARIABLE) {
-					currentSymbol = symbol_add(pSymbolTable, currentNode->tokenList[currentNode->tokenCount - 1].value, SYMBOL_TYPE_VARIABLE, symbolSize, SYMBOL_CLASS_VARIABLE);
+					currentSymbol = symbol_add(pSymbolTable, currentNode->tokenList[currentNode->tokenCount - 1].value, SYMBOL_TYPE_VARIABLE, symbolSize, *pScopeIndex, SYMBOL_CLASS_VARIABLE);
 				} else if (currentNode->type == NODE_TYPE_DECL_PARAMETER) {
-					currentSymbol = symbol_add(pSymbolTable, currentNode->tokenList[currentNode->tokenCount - 1].value, SYMBOL_TYPE_VARIABLE, symbolSize, SYMBOL_CLASS_VARIABLE);
+					currentSymbol = symbol_add(pSymbolTable, currentNode->tokenList[currentNode->tokenCount - 1].value, SYMBOL_TYPE_VARIABLE, symbolSize, *pScopeIndex, SYMBOL_CLASS_VARIABLE);
 				}
 				
 				// Set the symbol linkage and location appropriately
@@ -1200,7 +1205,7 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 				advance(1);
 				
 				// Get the expression associated with this keyword
-				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable, pScopeIndex);
 				
 				// We expect a semicolon; in the case it isn't, push an error
 				if (peek(0).type != TOKEN_TYPE_PT_SEMICOLON)
@@ -1216,7 +1221,7 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 				advance(1);
 				
 				// Get the function, variable, or module associated with this keyword
-				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable, pScopeIndex);
 				
 				// We only expect a semicolon in the case of modules; functions and variables handle themselves
 				if (currentNode->firstChild->tokenList[0].type == TOKEN_TYPE_KW_MODULE) {
@@ -1234,7 +1239,7 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 				advance(1);
 				
 				// Get the function, variable, or module associated with this keyword
-				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable, pScopeIndex);
 				
 				// We expect a semicolon; in the case it isn't, push an error
 				if (peek(0).type != TOKEN_TYPE_PT_SEMICOLON)
@@ -1250,7 +1255,7 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 				advance(1);
 			
 				// Get the function, variable, or module associated with this keyword
-				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable, pScopeIndex);
 				
 			} break;
 			
@@ -1284,7 +1289,7 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 				currentNode->firstChild = conditionNode;
 				
 				// Get the condition
-				conditionNode->firstChild = node_parse(pStream, conditionNode, pSymbolTable, pErrorTable);
+				conditionNode->firstChild = node_parse(pStream, conditionNode, pSymbolTable, pErrorTable, pScopeIndex);
 				
 				// We expect a closing paren; in the case it isn't, push an error and panic
 				if (peek(0).type != TOKEN_TYPE_PT_CLOSE_PAREN) {
@@ -1300,6 +1305,10 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 				node* scopeNode = node_new(NODE_TYPE_SCOPE, currentNode);
 				conditionNode->nextSibling = scopeNode;
 				
+				// Increment the scope index
+				(*pScopeIndex)++;
+				currentNode->scopeIndex = *pScopeIndex;
+				
 				// Check if this is a one-liner; if not, parse a whole body until the closing brace
 				if (peek(0).type == TOKEN_TYPE_PT_OPEN_BRACE) {
 					
@@ -1310,13 +1319,13 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 					if (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
 						
 						// Get the first child of this node
-						scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+						scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable, pScopeIndex);
 						node* bodyNode = scopeNode->firstChild;
 						
 						// Get the rest of the children
 						while (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
 							
-							bodyNode->nextSibling = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+							bodyNode->nextSibling = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable, pScopeIndex);
 							bodyNode = bodyNode->nextSibling;
 							
 						}
@@ -1336,7 +1345,7 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 					
 				} else {
 					
-					scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+					scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable, pScopeIndex);
 					
 					// The statement we just parsed should have resolved its semicolon, and the error is already pushed if it was not present. Semicolon checks can be omitted here
 					
@@ -1380,7 +1389,7 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 							advance(1);
 						
 						// Get the condition
-						conditionNode->firstChild = node_parse(pStream, conditionNode, pSymbolTable, pErrorTable);
+						conditionNode->firstChild = node_parse(pStream, conditionNode, pSymbolTable, pErrorTable, pScopeIndex);
 						
 						// We expect a closing paren; in the case that it isn't, push an error and panic
 						if (peek(0).type != TOKEN_TYPE_PT_CLOSE_PAREN) {
@@ -1400,6 +1409,10 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 					node* scopeNode = node_new(NODE_TYPE_SCOPE, currentNode);
 					conditionNode->nextSibling = scopeNode;
 					
+					// Increment the scope index
+					(*pScopeIndex)++;
+					currentNode->scopeIndex = *pScopeIndex;
+					
 					// Check if this is a one-liner; if not, parse a whole body until the closing brace
 					if (peek(0).type == TOKEN_TYPE_PT_OPEN_BRACE) {
 						
@@ -1410,13 +1423,13 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 						if (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
 							
 							// Get the first child of this node
-							scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+							scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable, pScopeIndex);
 							node* bodyNode = scopeNode->firstChild;
 							
 							// Get the rest of the children
 							while (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
 								
-								bodyNode->nextSibling = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+								bodyNode->nextSibling = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable, pScopeIndex);
 								bodyNode = bodyNode->nextSibling;
 								
 							}
@@ -1436,7 +1449,7 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 						
 					} else {
 						
-						scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+						scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable, pScopeIndex);
 						
 						// The statement we just parsed should have resolved its semicolon, and the error is already pushed if it was not present. Semicolon checks can be omitted here
 						
@@ -1495,7 +1508,7 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 					advance(1);
 				
 				// Create a new identifier node
-				node* expressionNode = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+				node* expressionNode = node_parse(pStream, currentNode, pSymbolTable, pErrorTable, pScopeIndex);
 				currentNode->firstChild = expressionNode;
 				
 				advance(1);
@@ -1503,6 +1516,10 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 				// Create a new scope node
 				node* scopeNode = node_new(NODE_TYPE_SCOPE, currentNode);
 				expressionNode->nextSibling = scopeNode;
+				
+				// Increment the scope index
+				(*pScopeIndex)++;
+				currentNode->scopeIndex = *pScopeIndex;
 				
 				// Get all the cases under this switch statement; if there are none, push an error
 				if (peek(0).type == TOKEN_TYPE_PT_OPEN_BRACE) {
@@ -1514,13 +1531,13 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 					if (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
 						
 						// Get the first child of this node
-						scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+						scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable, pScopeIndex);
 						node* thisNode = scopeNode->firstChild;
 						
 						// Get the rest of the children
 						while (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
 							
-							thisNode->nextSibling = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+							thisNode->nextSibling = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable, pScopeIndex);
 							thisNode = thisNode->nextSibling;
 							
 						}
@@ -1572,7 +1589,7 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 					advance(1);
 				
 				// Parse the expression node
-				node* expressionNode = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+				node* expressionNode = node_parse(pStream, currentNode, pSymbolTable, pErrorTable, pScopeIndex);
 				currentNode->firstChild = expressionNode;
 				
 				// Advance past the closing paren
@@ -1581,6 +1598,10 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 				// Create a new scope node
 				node* scopeNode = node_new(NODE_TYPE_SCOPE, currentNode);
 				currentNode->firstChild = scopeNode;
+				
+				// Increment the scope index
+				(*pScopeIndex)++;
+				currentNode->scopeIndex = *pScopeIndex;
 				
 				// Check if this is a one-liner; if not, parse a whole body until the closing brace
 				if (peek(0).type == TOKEN_TYPE_PT_OPEN_BRACE) {
@@ -1592,13 +1613,13 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 					if (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
 						
 						// Get the first child of this node
-						scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+						scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable, pScopeIndex);
 						node* bodyNode = scopeNode->firstChild;
 						
 						// Get the rest of the children
 						while (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
 							
-							bodyNode->nextSibling = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+							bodyNode->nextSibling = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable, pScopeIndex);
 							bodyNode = bodyNode->nextSibling;
 							
 						}
@@ -1618,7 +1639,7 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 					
 				} else {
 					
-					scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+					scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable, pScopeIndex);
 					
 					// The statement we just parsed should have resolved its semicolon, and the error is already pushed if it was not present. Semicolon checks can be omitted here
 					
@@ -1637,6 +1658,10 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 				node* scopeNode = node_new(NODE_TYPE_SCOPE, currentNode);
 				currentNode->firstChild = scopeNode;
 				
+				// Increment the scope index
+				(*pScopeIndex)++;
+				currentNode->scopeIndex = *pScopeIndex;
+				
 				// Check if this is a one-liner; if not, parse a whole body until the closing brace
 				if (peek(0).type == TOKEN_TYPE_PT_OPEN_BRACE) {
 					
@@ -1647,13 +1672,13 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 					if (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
 						
 						// Get the first child of this node
-						scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+						scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable, pScopeIndex);
 						node* bodyNode = scopeNode->firstChild;
 						
 						// Get the rest of the children
 						while (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
 							
-							bodyNode->nextSibling = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+							bodyNode->nextSibling = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable, pScopeIndex);
 							bodyNode = bodyNode->nextSibling;
 							
 						}
@@ -1673,7 +1698,7 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 					
 				} else {
 					
-					scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+					scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable, pScopeIndex);
 					
 					// The statement we just parsed should have resolved its semicolon, and the error is already pushed if it was not present. Semicolon checks can be omitted here
 					
@@ -1687,7 +1712,7 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 				advance(1);
 				
 				// Get the identifier for this namespace
-				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable, pScopeIndex);
 				
 				// We expect an opening brace; in the case that it isn't, push an error and panic
 				if (peek(0).type == TOKEN_TYPE_PT_OPEN_BRACE) {
@@ -1699,13 +1724,13 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 					if (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
 						
 						// Get the first child of this node
-						node* bodyNode = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+						node* bodyNode = node_parse(pStream, currentNode, pSymbolTable, pErrorTable, pScopeIndex);
 						currentNode->firstChild = bodyNode;
 						
 						// Get the rest of the children
 						while (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
 							
-							bodyNode->nextSibling = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+							bodyNode->nextSibling = node_parse(pStream, currentNode, pSymbolTable, pErrorTable, pScopeIndex);
 							bodyNode = bodyNode->nextSibling;
 							
 						}
@@ -1741,7 +1766,7 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 				advance(1);
 				
 				// We expect an identifier node; it is checked later in semantic analysis
-				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable, pScopeIndex);
 				
 				// Identifiers do not advance past their semicolons, so it's up to us to check it; if there isn't one, push an error
 				if (peek(0).type != TOKEN_TYPE_PT_SEMICOLON)
@@ -1782,7 +1807,7 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 				// We expect an initializer node; in the case there isn't one, just skip it
 				if (peek(0).type != TOKEN_TYPE_PT_SEMICOLON) {
 					
-					currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+					currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable, pScopeIndex);
 					thisNode = currentNode->firstChild;
 					
 					// The initializer we just parsed should have resolved its semicolon, and the error is already pushed if it was not present. Semicolon checks can be omitted here
@@ -1806,7 +1831,7 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 					}
 					
 					// Parse the condition
-					conditionNode->firstChild = node_parse(pStream, conditionNode, pSymbolTable, pErrorTable);
+					conditionNode->firstChild = node_parse(pStream, conditionNode, pSymbolTable, pErrorTable, pScopeIndex);
 					
 					// Conditions do not advance past their semicolons, so it's up to us to check it; if there isn't one, push an error
 					if (peek(0).type != TOKEN_TYPE_PT_SEMICOLON) {
@@ -1826,10 +1851,10 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 					
 					// We expect an operation node; in the case there isn't one, just skip it; if there is a previous node, link it to this one
 					if (thisNode) {
-						thisNode->nextSibling = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+						thisNode->nextSibling = node_parse(pStream, currentNode, pSymbolTable, pErrorTable, pScopeIndex);
 						thisNode = thisNode->nextSibling;
 					} else {
-						currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+						currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable, pScopeIndex);
 						thisNode = currentNode->firstChild;
 					}
 					
@@ -1847,6 +1872,10 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 				
 				// Create a new scope node
 				node* scopeNode = node_new(NODE_TYPE_SCOPE, currentNode);
+				
+				// Increment the scope index
+				(*pScopeIndex)++;
+				currentNode->scopeIndex = *pScopeIndex;
 				
 				// If there is a previous node, link it to this one
 				if (thisNode) {
@@ -1867,13 +1896,13 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 					if (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
 						
 						// Get the first child of this node
-						scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+						scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable, pScopeIndex);
 						node* bodyNode = scopeNode->firstChild;
 						
 						// Get the rest of the children
 						while (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
 							
-							bodyNode->nextSibling = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+							bodyNode->nextSibling = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable, pScopeIndex);
 							bodyNode = bodyNode->nextSibling;
 							
 						}
@@ -1893,7 +1922,7 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 					
 				} else {
 					
-					scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable);
+					scopeNode->firstChild = node_parse(pStream, scopeNode, pSymbolTable, pErrorTable, pScopeIndex);
 					
 					// The statement we just parsed should have resolved its semicolon, and the error is already pushed if it was not present. Semicolon checks can be omitted here
 					
@@ -1907,7 +1936,7 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 				advance(1);
 				
 				// Get the identifier that we are using
-				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable, pScopeIndex);
 				node* thisNode = currentNode->firstChild;
 				
 				// We should end up on a colon, as it separates the identifier from what we are using; in case that it isn't, push an error and panic
@@ -1929,7 +1958,7 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 					advance(1);
 				
 				// Now get the thing we are using
-				thisNode->nextSibling = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+				thisNode->nextSibling = node_parse(pStream, currentNode, pSymbolTable, pErrorTable, pScopeIndex);
 				
 				// The thing we are using should have resolved its semicolon, and the error is already pushed if it was not present. Semicolon checks can be omitted here
 				
@@ -1968,13 +1997,13 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 				if (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
 					
 					// Get the first child of this node
-					node* bodyNode = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+					node* bodyNode = node_parse(pStream, currentNode, pSymbolTable, pErrorTable, pScopeIndex);
 					currentNode->firstChild = bodyNode;
 					
 					// Get the rest of the children
 					while (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
 						
-						bodyNode->nextSibling = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+						bodyNode->nextSibling = node_parse(pStream, currentNode, pSymbolTable, pErrorTable, pScopeIndex);
 						bodyNode = bodyNode->nextSibling;
 						
 					}
@@ -2031,17 +2060,21 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 		// Create a new scope node
 		currentNode->type = NODE_TYPE_SCOPE;
 		
+		// Increment the scope index
+		(*pScopeIndex)++;
+		currentNode->scopeIndex = *pScopeIndex;
+		
 		// Make sure that there is a populated body; in the case that there isn't, push an error
 		if (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
 			
 			// Get the first child of this node
-			currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+			currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable, pScopeIndex);
 			node* bodyNode = currentNode->firstChild;
 			
 			// Get the rest of the children
 			while (peek(0).type != TOKEN_TYPE_PT_CLOSE_BRACE) {
-				printf("i rann\n");
-				bodyNode->nextSibling = node_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+				
+				bodyNode->nextSibling = node_parse(pStream, currentNode, pSymbolTable, pErrorTable, pScopeIndex);
 				bodyNode = bodyNode->nextSibling;
 				
 			}
@@ -2087,15 +2120,16 @@ bool ast_create(ast* pAST, ast_info* pInfo) {
 	
 	// Parse the stream into the AST
 	pInfo->pStream->index = 0;
+	pAST->scopeIndex = 0;
 	
 	// Parse the first node
-	node* thisNode = node_parse(pInfo->pStream, fileNode, pInfo->pSymbolTable, pInfo->pErrorTable);
+	node* thisNode = node_parse(pInfo->pStream, fileNode, pInfo->pSymbolTable, pInfo->pErrorTable, &pAST->scopeIndex);
 	if (!thisNode) return false;
 	fileNode->firstChild = thisNode;
 	
 	// Parse every other node
 	while (pInfo->pStream->index < pInfo->pStream->size) {
-		thisNode->nextSibling = node_parse(pInfo->pStream, fileNode, pInfo->pSymbolTable, pInfo->pErrorTable);
+		thisNode->nextSibling = node_parse(pInfo->pStream, fileNode, pInfo->pSymbolTable, pInfo->pErrorTable, &pAST->scopeIndex);
 		if (!thisNode->nextSibling) return false;
 		thisNode = thisNode->nextSibling;
 	}

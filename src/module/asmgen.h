@@ -4,25 +4,30 @@
 
 typedef struct {
 	ir* pIR;
-} asm_info;
+} assm_info;
 
 typedef enum {
 	
-	ASM_MODE_SCAN,
+	ASM_MODE_VISIBILITY,
+	ASM_MODE_LITERALS,
 	ASM_MODE_PARSE,
 	
-} asm_mode;
+} assm_mode;
 
 typedef struct {
 	size_t memSize;
 	size_t size;
 	size_t index;
 	bool foundMain;
-	asm_mode mode;
+	char* currentFunc;
+	char* stackSize;
+	assm_mode mode;
 	char* buffer;
-} asm;
+	symbol_table offsetTable;
+	size_t offset;
+} assm;
 
 // [ FUNCTIONS ] //
 
-bool asm_generate(asm* pAsm, asm_info* pInfo);
-void asm_print(asm* pAsm);
+bool assm_generate(assm* pAsm, assm_info* pInfo);
+void assm_print(assm* pAsm);

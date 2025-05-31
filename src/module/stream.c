@@ -113,9 +113,10 @@ token_type str_isLiteral(const char* str) {
 	}
 	
 	// String literal
+	size_t i = 0;
 	if (str[0] == '"') {
 		str++;
-		while (*str != '\0' && *str != '"') {
+		while (*str != '"' && i < MAX_VALUE_LEN) {
 			str++;
 		}
 		if (*str == '"') {

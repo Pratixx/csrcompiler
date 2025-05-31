@@ -9,10 +9,9 @@
 
 // [ MACROS ] //
 
-#define MAX_VALUE_LEN 32
+#define MAX_VALUE_LEN 65 // Includes null terminator
 #define MAX_OPERATOR_LEN 3
 #define MAX_PUNCTUATOR_LEN 3
-#define MAX_ARRAY_LEN 128
 
 #define case(arg) case arg:
 
@@ -59,7 +58,7 @@ static struct token_table token_kw_table[] = {
 	{"while",    TOKEN_TYPE_KW_WHILE},
 	{"for",      TOKEN_TYPE_KW_FOR},
 	{"continue", TOKEN_TYPE_KW_CONTINUE},
-	{"exit",     TOKEN_TYPE_KW_EXIT},
+	// {"exit",     TOKEN_TYPE_KW_EXIT},
 	
 	{"break", TOKEN_TYPE_KW_BREAK},
 	{"jump",  TOKEN_TYPE_KW_JUMP},
@@ -118,10 +117,10 @@ static struct token_table token_op_table[] = {
 	{"&&", TOKEN_TYPE_OP_CMP_AND},
 	{"||", TOKEN_TYPE_OP_CMP_OR},
 	{"==", TOKEN_TYPE_OP_CMP_EQUAL},
-	{"<",  TOKEN_TYPE_OP_CMP_LESS},
 	{"<=", TOKEN_TYPE_OP_CMP_LESS_EQUAL},
-	{">",  TOKEN_TYPE_OP_CMP_GREATER},
+	{"<",  TOKEN_TYPE_OP_CMP_LESS},
 	{">=", TOKEN_TYPE_OP_CMP_GREATER_EQUAL},
+	{">",  TOKEN_TYPE_OP_CMP_GREATER},
 	{"!",  TOKEN_TYPE_OP_CMP_NOT},
 	
 	{"&",  TOKEN_TYPE_OP_BIT_AND},
@@ -152,8 +151,6 @@ static struct token_table token_op_table[] = {
 static struct token_table token_sp_table[] = {
 	
 	{"*", TOKEN_TYPE_SP_PTR},
-	
-	{"void", TOKEN_TYPE_SP_VOID},
 	
 	{"long", TOKEN_TYPE_SP_LONG},
 	{"short", TOKEN_TYPE_SP_SHORT},
