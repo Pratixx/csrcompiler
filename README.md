@@ -50,9 +50,24 @@ C* introduces CTTI (compile-time type information) through the use of the `refle
 C* is nowhere near finished, but certain things do compile into a valid Assembly file. For example, the following program will compile into an assemblable and linkable x64 Windows program:
 
 ```
-int main(int argc, byte** argv) {
+export int main(byte* args) {
 	
-	return 5 + 3;
+	int a = 0;
+	int b = 1;
+	int c = 0;
+	int n = 5;
+	
+	while (n) {
+		
+		c = 0 + a + b;
+		a = 0 + b;
+		b = 0 + c;
+		
+		n--;
+		
+	}
+	
+	return 0 + c;
 	
 }
 ```
