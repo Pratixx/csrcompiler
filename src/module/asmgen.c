@@ -17,7 +17,7 @@
 
 #define peek(x) (((pIR->index + (x)) >= pIR->size) ? (unit){UNIT_TYPE_KW_END, ""} : (pIR->buffer[pIR->index + (x)]))
 #define upeek(x) (pIR->buffer[pIR->index + (x)])
-#define ppeek(x) ((pIR->index >= pIR->size + (x)) ? (unit[]){(unit){UNIT_TYPE_KW_END, ""}} : &(pIR->buffer[pIR->index + (x)]))
+#define ppeek(x) ((pIR->index + (x) >= pIR->size) ? (unit[]){(unit){UNIT_TYPE_KW_END, ""}} : &(pIR->buffer[pIR->index + (x)]))
 
 // [ DEFINING ] //
 
@@ -55,6 +55,7 @@ static bool assm_resize(assm* pAssm, size_t needed) {
 	
 	// Copy the new memory in and free the old buffer
 	memcpy(newBuffer, pAssm->buffer, pAssm->memSize);
+	newBuffer[pAssm->memSize - 1] = '\0';
 	free(pAssm->buffer);
 	
 	// Assign the new buffer to the old one
@@ -110,6 +111,7 @@ static size_t to_size(unit* pUnit) {
 }
 
 static char* to_reg(assm* pAssm, unit* pUnit) {
+	
 	switch (pUnit[0].type) {
 		
 		// General purpose registers
@@ -179,7 +181,7 @@ static char* to_reg(assm* pAssm, unit* pUnit) {
 			switch (pUnit[-1].type) {
 				case (UNIT_TYPE_TP_S32) return "eax";
 				case (UNIT_TYPE_TP_S64) return "rax";
-				default: return "rax";
+				default: return "eax";
 			}
 		}
 		
@@ -376,18 +378,25 @@ static void instruction_parse(assm* pAssm, ir* pIR) {
 				// Advance past the return keyword
 				advance(1);
 				
+				// Search backwards for the index of the retval unit
+				int64_t index = 0;
+				while (peek(index).type != UNIT_TYPE_RG_RETVAL) index--;
+				
 				// Return
 				if (strcmp(pAssm->currentFunc, "main") == 0) {
 					
-					instruction_push(pAssm, "mov ecx, r10d\n");
+					instruction_push(pAssm, "mov ecx, %s\n", to_reg(pAssm, ppeek(index)));
 					instruction_push(pAssm, "call ExitProcess\n");
 					
 				} else {
 					
-					instruction_push(pAssm, "mov eax, r10d\n");
+					instruction_push(pAssm, "mov ecx, %s\n", to_reg(pAssm, ppeek(index)));
 					instruction_push(pAssm, "ret\n");
 					
 				}
+				
+				// Advance past the semicolon
+				advance(1);
 				
 			} break;
 			
@@ -427,14 +436,61 @@ static void instruction_parse(assm* pAssm, ir* pIR) {
 				
 			} break;
 			
+			case (UNIT_TYPE_LABEL) {
+				
+				// Check if this is a jump or a declaration
+				if (peek(-1).type == UNIT_TYPE_KW_JUMP)
+					instruction_push(pAssm, "jmp %s\n", peek(0).value);
+				else
+					instruction_push(pAssm, "%s:\n", peek(0).value);
+				
+				// Advance past this and the semicolon
+				advance(2);
+				
+			} break;
+			
+			case (UNIT_TYPE_KW_IF) {
+				
+				// Advance past this keyword
+				if ((peek(1).type == UNIT_TYPE_IDENTIFIER) || (peek(1).type == UNIT_TYPE_LITERAL))
+					advance(1);
+				else
+					advance(2);
+				
+				// Check if this is a zero comparison
+				if (peek(1).type == UNIT_TYPE_KW_CMP_Z) {
+					
+					// Emit the variable / register / literal; we need to move into a register because mem-to-mem ops aren't allowed on "test"
+					instruction_push(pAssm, "mov eax, %s\n", to_reg(pAssm, ppeek(0)));
+					
+					// Emit a comparison
+					instruction_push(pAssm, "test eax, eax\n");
+					
+					// Advance to the label
+					advance(3);
+					
+					// And perform the jump
+					instruction_push(pAssm, "jz %s\n", peek(0).value);
+					
+					// Advance past this and the semicolon
+					advance(2);
+					
+				} else {
+					
+					
+					
+				}
+				
+			} break;
+			
 			// Variables!
 			case (UNIT_TYPE_KW_LOCAL) {
 				
-				// Add this variable to the offset table
-				symbol* pSym = symbol_add(&pAssm->offsetTable, peek(2).value, SYMBOL_TYPE_VARIABLE, to_size(ppeek(1)), pAssm->offset, SYMBOL_CLASS_VARIABLE);
-				
 				// Add to the offset
 				pAssm->offset += to_size(ppeek(1));
+				
+				// Add this variable to the offset table
+				symbol* pSym = symbol_add(&pAssm->offsetTable, peek(2).value, SYMBOL_TYPE_VARIABLE, to_size(ppeek(1)), pAssm->offset, SYMBOL_CLASS_VARIABLE);
 				
 				// Advance past this, the size, and the semicolon
 				advance(3);
@@ -459,9 +515,6 @@ static void instruction_parse(assm* pAssm, ir* pIR) {
 				instruction_push(pAssm, "sub rsp, 32 ; This should be optimized later to merge with below\n");
 				instruction_push(pAssm, "sub rsp, %s\n", peek(0).value);
 				
-				// Set the stack space size
-				pAssm->stackSize = peek(0).value;
-				
 				// Advance past this and the semicolon
 				advance(2);
 				
@@ -472,9 +525,23 @@ static void instruction_parse(assm* pAssm, ir* pIR) {
 				// Destroy the offset table, as we're done with our variables
 				symbol_table_destroy(&pAssm->offsetTable);
 				
+				// Search backwards for our linked alloc unit and emit its stack size
+				int64_t index = 0;
+				int64_t depth = 0;
+				while ((pIR->index + index) > 0) {
+					
+					index--;
+					
+					if (peek(index).type == UNIT_TYPE_KW_FREE) depth++;
+					if (peek(index).type == UNIT_TYPE_KW_ALLOC) depth--;
+					
+					if (depth < 0) break;
+					
+				}
+				
 				// Add back X bytes to the stack pointer, including the 32 bytes of shadow space
 				instruction_push(pAssm, "add rsp, 32 ; Same thing\n");
-				instruction_push(pAssm, "add rsp, %s\n", pAssm->stackSize);
+				instruction_push(pAssm, "add rsp, %s\n", peek(index + 1).value);
 				
 				// Advance past this and the semicolon
 				advance(2);
@@ -516,11 +583,10 @@ static void instruction_parse(assm* pAssm, ir* pIR) {
 			
 			case (UNIT_TYPE_KW_MOVE) {
 				
-				// Check if we're moving in a literal
 				instruction_push(pAssm, "mov ");
 				
 				// Advance past this keyword
-				if (peek(1).type == UNIT_TYPE_IDENTIFIER)
+				if ((peek(1).type == UNIT_TYPE_IDENTIFIER) || (peek(1).type == UNIT_TYPE_LITERAL))
 					advance(1);
 				else
 					advance(2);
@@ -528,8 +594,14 @@ static void instruction_parse(assm* pAssm, ir* pIR) {
 				// Push the first register
 				instruction_push(pAssm, "%s, ", to_reg(pAssm, ppeek(0)));
 				
-				// Advance past the register and the comma
-				advance(2);
+				// Advance past the comma
+				advance(1);
+				
+				// Advance past this keyword
+				if ((peek(1).type == UNIT_TYPE_IDENTIFIER) || (peek(1).type == UNIT_TYPE_LITERAL))
+					advance(1);
+				else
+					advance(2);
 				
 				// Push the second register or literal
 				instruction_push(pAssm, "%s\n", to_reg(pAssm, ppeek(0)));
@@ -568,11 +640,8 @@ static void instruction_parse(assm* pAssm, ir* pIR) {
 			
 			case (UNIT_TYPE_KW_MUL) {
 				
-				// Advance past this keyword
-				advance(1);
-				
 				// Depending on the type, we need to handle some special x86 quirks
-				if (unit_isUnsigned(peek(0).type)) {
+				if (unit_isUnsigned(peek(1).type)) {
 					
 					// Hold the register we're pulling from to move back into later
 					char* reg = to_reg(pAssm, ppeek(0));
@@ -596,17 +665,25 @@ static void instruction_parse(assm* pAssm, ir* pIR) {
 					
 					// There are no quirks for signed division
 					
-					// Advance past the type
-					advance(1);
-
-					// Emit this operation
 					instruction_push(pAssm, "imul ");
+					
+					// Advance past this keyword
+					if ((peek(1).type == UNIT_TYPE_IDENTIFIER) || (peek(1).type == UNIT_TYPE_LITERAL))
+						advance(1);
+					else
+						advance(2);
 					
 					// Push the first register
 					instruction_push(pAssm, "%s, ", to_reg(pAssm, ppeek(0)));
 					
-					// Advance past the register, comma, and the type
-					advance(3);
+					// Advance past the comma
+					advance(1);
+					
+					// Advance past this keyword
+					if ((peek(1).type == UNIT_TYPE_IDENTIFIER) || (peek(1).type == UNIT_TYPE_LITERAL))
+						advance(1);
+					else
+						advance(2);
 					
 					// Push the second register or literal
 					instruction_push(pAssm, "%s\n", to_reg(pAssm, ppeek(0)));
@@ -623,11 +700,8 @@ static void instruction_parse(assm* pAssm, ir* pIR) {
 				// Division is extremely weird; the dividend is in the accumulator, and the quotient ends up in the accumulator...
 				// Yeah, strange. Oh, and you have to sign extend the register with cdq or zero it out depending if it's signed or unsigned.
 				
-				// Advance past this keyword
-				advance(1);
-				
 				// Depending on the type, we need to handle some special x86 quirks
-				if (unit_isUnsigned(peek(0).type)) {
+				if (unit_isUnsigned(peek(1).type)) {
 					
 					// Advance past the type
 					advance(1);
@@ -658,36 +732,86 @@ static void instruction_parse(assm* pAssm, ir* pIR) {
 					
 				} else {
 					
-					// Advance past the type
-					advance(1);
+					// Advance past this keyword
+					if ((peek(1).type == UNIT_TYPE_IDENTIFIER) || (peek(1).type == UNIT_TYPE_LITERAL))
+						advance(1);
+					else
+						advance(2);
 					
 					// Hold the register we're pulling from to move back into later
 					char* reg = to_reg(pAssm, ppeek(0));
 					
-					// We need to load the dividend into the accumulator register
+					// Save rcx and rdx to the shadow space since they are function arguments
+					// eax is non-volatile in this implementation, so no concerns with preserving it
+					instruction_push(pAssm, "mov qword [rsp+0], rcx\n");
+					instruction_push(pAssm, "mov qword [rsp+8], rdx\n");
+					
+					// We need to load the dividend into eax
 					instruction_push(pAssm, "mov eax, %s\n", reg);
 					
-					// Advance past the register, comma, and the type
-					advance(3);
+					// Advance past the comma
+					advance(1);
 					
-					// Sign extend into edx
+					// Advance past this keyword
+					if ((peek(1).type == UNIT_TYPE_IDENTIFIER) || (peek(1).type == UNIT_TYPE_LITERAL))
+						advance(1);
+					else
+						advance(2);
+					
+					// Sign extend
 					instruction_push(pAssm, "cdq\n");
 					
-					// Move the divisor into the counter, since you can't divide by literals for some reason...
+					// Move the divisor into edx
 					instruction_push(pAssm, "mov ecx, %s\n", to_reg(pAssm, ppeek(0)));
 					
 					// Divide the accumulator by the register or literal
 					instruction_push(pAssm, "idiv ecx\n");
 					
-					// Move this back into the register we pulled from
+					// Move the quotient back into the register
 					instruction_push(pAssm, "mov %s, eax\n", reg);
+					
+					// Restore rdx and rcx
+					instruction_push(pAssm, "mov rcx, qword [rsp+0]\n");
+					instruction_push(pAssm, "mov rdx, qword [rsp+8]\n");
 					
 					// Advance past this second register or literal and the semicolon
 					advance(2);
 					
 				}
 				
-			}
+			} break;
+			
+			case (UNIT_TYPE_KW_INC) {
+				
+				// Advance to the register or identifier
+				if (peek(1).type == UNIT_TYPE_IDENTIFIER)
+					advance(1);
+				else
+					advance(2);
+				
+				// Push the variable or register
+				instruction_push(pAssm, "inc %s\n", to_reg(pAssm, ppeek(0)));
+				
+				// Advance past this and the semicolon
+				advance(2);
+				
+			} break;
+			
+			case (UNIT_TYPE_KW_DEC) {
+				
+				// Advance to the register or identifier
+				if (peek(1).type == UNIT_TYPE_IDENTIFIER)
+					advance(1);
+				else
+					advance(2);
+				
+				// Push the variable or register
+				instruction_push(pAssm, "dec %s\n", to_reg(pAssm, ppeek(0)));
+				
+				// Advance past this and the semicolon
+				advance(2);
+				
+			} break;
 			
 			default: {
 				
@@ -764,7 +888,7 @@ bool assm_generate(assm* pAssm, assm_info* pInfo) {
 	}
 	
 	// Null terminate the string
-	pAssm->buffer[pAssm->size] = '\0';
+	pAssm->buffer[pAssm->size - 1] = '\0';
 	
 	// Return success
 	return true;

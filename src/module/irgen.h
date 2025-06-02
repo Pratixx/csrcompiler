@@ -9,6 +9,7 @@ typedef enum {
 	
 	UNIT_TYPE_IDENTIFIER,
 	UNIT_TYPE_LITERAL,
+	UNIT_TYPE_LABEL,
 	
 	// Punctuator units
 	UNIT_TYPE_PT_SEMICOLON,
@@ -23,6 +24,16 @@ typedef enum {
 	
 	UNIT_TYPE_KW_CALL,
 	UNIT_TYPE_KW_JUMP,
+	UNIT_TYPE_KW_IF,
+	
+	UNIT_TYPE_KW_CMP_Z,
+	UNIT_TYPE_KW_CMP_G,
+	UNIT_TYPE_KW_CMP_L,
+	UNIT_TYPE_KW_CMP_E,
+	UNIT_TYPE_KW_CMP_NZ,
+	UNIT_TYPE_KW_CMP_GE,
+	UNIT_TYPE_KW_CMP_LE,
+	UNIT_TYPE_KW_CMP_NE,
 	
 	UNIT_TYPE_KW_EXPORT,
 	UNIT_TYPE_KW_IMPORT,
@@ -39,6 +50,9 @@ typedef enum {
 	UNIT_TYPE_KW_SUB,
 	UNIT_TYPE_KW_MUL,
 	UNIT_TYPE_KW_DIV,
+	UNIT_TYPE_KW_MOD,
+	UNIT_TYPE_KW_INC,
+	UNIT_TYPE_KW_DEC,
 	
 	UNIT_TYPE_KW_ARG_PUSH,
 	UNIT_TYPE_KW_ARG_POP,
@@ -95,12 +109,31 @@ typedef struct {
 } ir_info;
 
 typedef struct {
+	
 	size_t index;
 	size_t memSize;
 	size_t size;
-	unit_type lastRegister;
-	unit_type lastRegisterType;
 	unit* buffer;
+	
+	struct {
+		
+		struct {
+			char* name;
+			unit_type retType;
+		} thisFunc;
+		
+		size_t lblIndex;
+		
+		bool allocFrame;
+		
+		unit* pRet;
+		node* pRetNode;
+		size_t pRetNodeIndex;
+		
+		symbol_table varTable;
+		
+	} info;
+	
 } ir;
 
 // [ FUNCTIONS ] //

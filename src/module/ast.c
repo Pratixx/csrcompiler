@@ -116,7 +116,7 @@ bool token_isTypeQualifier(token_type tokenType) {
 
 /*////////*/
 
-void token_resolve(token* pToken, node* pParent, symbol_table* pSymbolTable) {
+static void token_resolve(token* pToken, node* pParent, symbol_table* pSymbolTable) {
 	
 	if (pToken->type == TOKEN_TYPE_INVALID) {
 		
@@ -171,18 +171,17 @@ void token_resolve(token* pToken, node* pParent, symbol_table* pSymbolTable) {
 		pToken->type = TOKEN_TYPE_INVALID;
 		
 	} else if (pToken->type == TOKEN_TYPE_PT_AMPERSAND) {
+		printf("%d\n", resolve.inExpr);
 		
-		if (token_isIdentifier(pToken[-1].type) || (pToken[-1].type == TOKEN_TYPE_SP_PTR)) {
-			
-			pToken->type = TOKEN_TYPE_SP_PTR;
-			
-			return;
-			
-		} else if (token_isLiteral(pToken[-1].type) || token_isOperator(pToken[-1].type) || resolve.inExpr) {
+		if (token_isLiteral(pToken[-1].type) || token_isOperator(pToken[-1].type) || resolve.inExpr) {
 			
 			pToken->type = TOKEN_TYPE_OP_MUL;
 			
-			return;
+		} else if (token_isIdentifier(pToken[-1].type) || (pToken[-1].type == TOKEN_TYPE_SP_PTR)) {
+			
+			pToken->type = TOKEN_TYPE_SP_PTR;
+			
+			
 			
 		}
 		
@@ -377,6 +376,9 @@ static node* expr_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 	
 	// Mark that we're in an expression
 	resolve.inExpr = true;
+	
+	// Attempt to resolve the token in case it is unresolved
+	token_resolve(ppeek(0), pParent, pSymbolTable);
 	
 	// Get the range of the expression
 	size_t range = 0;
@@ -715,7 +717,48 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 		
 	}
 	
-	// Handle identifiers
+	// Resolve expressions
+	if (token_isOperator(startToken->type)) {
+		
+		switch (startToken->type) {
+			
+			case (TOKEN_TYPE_OP_ASSIGN) {
+				
+				currentNode->type = NODE_TYPE_OPERATION;
+				currentNode->tokenCount = 1;
+				currentNode->tokenList = ppeek(0);
+				
+				// Advance to the first token in the expression
+				advance(1);
+				
+				// Parse the expression
+				currentNode->firstChild = expr_parse(pStream, currentNode, pSymbolTable, pErrorTable);
+				
+				// Return this to the caller
+				return currentNode;
+				
+			} break;
+			
+			case (TOKEN_TYPE_OP_INC)
+			case (TOKEN_TYPE_OP_DEC) {
+				
+				currentNode->type = NODE_TYPE_OPERATION;
+				currentNode->tokenCount = 1;
+				currentNode->tokenList = ppeek(0);
+				
+				// Advance past the semicolon
+				advance(1);
+				
+				// Return this to the caller
+				return currentNode;
+				
+			}
+			
+		}
+		
+	}
+	
+	// Handle declarations
 	if (token_isTypeQualifier(startToken->type) || token_isTypeSpecifier(startToken->type) || token_isIdentifier(startToken->type)) {
 		
 		// Check if this is a simple, unmodified identifier
@@ -853,31 +896,54 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 			
 		}
 		
+		// Resolve the next token in the case its a multiplication operator
+		token_resolve(ppeek(1), pParent, pSymbolTable);
+		
 		// See if we're modifying a variable rather than defining one
 		if (token_isOperator(peek(1).type)) {
 			
-			// Advance past the identifier
-			advance(1);
-			
-			currentNode->type = NODE_TYPE_IDENTIFIER;
-			
-			// Create an assignnment node
-			node* thisNode = node_new(NODE_TYPE_OPERATION, currentNode);
-			thisNode->tokenCount = 1;
-			thisNode->tokenList = ppeek(0);
-			currentNode->firstChild = thisNode;
-			
-			// Advance past the operation
-			advance(1);
-			
-			// If we're not hitting a semicolon or closing paren, then it must be a parsable expression
-			if ((peek(0).type != TOKEN_TYPE_PT_CLOSE_PAREN) && (peek(0).type != TOKEN_TYPE_PT_SEMICOLON)) {
+			// Check if we are the lvalue or rvalue of an assignment
+			switch (peek(1).type) {
 				
-				thisNode->firstChild = node_parse(pStream, thisNode, pSymbolTable, pErrorTable, pScopeIndex);
+				case (TOKEN_TYPE_OP_INC)
+				case (TOKEN_TYPE_OP_DEC)
+				case (TOKEN_TYPE_OP_ASSIGN) {
+					
+					currentNode->type = NODE_TYPE_IDENTIFIER;
+					
+					// Advance past this identifier
+					advance(1);
+					
+					// Create the expression
+					currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable, pScopeIndex);
+					
+					// We expect a semicolon; in the case that it isn't, push an error
+					if (peek(0).type != TOKEN_TYPE_PT_SEMICOLON)
+						error_table_push(pErrorTable, ERROR_SYNTACTIC_MISSING_SEMICOLON, currentNode);
+					else
+						advance(1);
+					
+					// Return this node
+					return currentNode;
+					
+				} break;
+				
+				default: {
+					
+					currentNode->type = NODE_TYPE_IDENTIFIER;
+					
+					// Parse this expression
+					node* exprNode = expr_parse(pStream, pParent, pSymbolTable, pErrorTable);
+					
+					// We are part of an expression and can be discarded
+					node_delete(currentNode);
+					
+					// Return the expression node
+					return exprNode;
+					
+				} break;
 				
 			}
-			
-			return currentNode;
 			
 		}
 		
@@ -1064,17 +1130,8 @@ static node* node_parse(stream* pStream, node* pParent, symbol_table* pSymbolTab
 				
 				currentNode->type = NODE_TYPE_DECL_VARIABLE;
 				
-				// Make an assignnment node
-				node* operationNode = node_new(NODE_TYPE_OPERATION, currentNode);
-				operationNode->tokenCount = 1;
-				operationNode->tokenList = ppeek(0);
-				currentNode->firstChild = operationNode;
-				
-				// Assign the expression to this variable
-				advance(1);
-				
 				// Get the expression
-				operationNode->firstChild = node_parse(pStream, operationNode, pSymbolTable, pErrorTable, pScopeIndex);
+				currentNode->firstChild = node_parse(pStream, currentNode, pSymbolTable, pErrorTable, pScopeIndex);
 				
 				// We expect a semicolon; in the case that it isn't, push an error
 				if (peek(0).type != TOKEN_TYPE_PT_SEMICOLON)
